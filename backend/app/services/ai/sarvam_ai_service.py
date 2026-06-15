@@ -22,6 +22,7 @@ LANGUAGE_NAMES = {
     "kn-IN": "Kannada",
 }
 
+# Annual household income ceiling (INR) used for a conservative Samathuvapuram pre-screen in app logic.
 SAMATHUVAPURAM_INCOME_LIMIT = 300000
 
 SYSTEM_PROMPT_FARMER = """You are KrishiMitra AI, an enterprise-grade agricultural decision-support assistant for Indian farmers, FPOs, and field extension teams.
@@ -419,6 +420,10 @@ def _ownership_type(land_ownership: Optional[str]) -> str:
     return "unknown"
 
 
+def _state_matches(state_value: str, *aliases: str) -> bool:
+    return bool(state_value) and state_value in aliases
+
+
 def _eligibility_result(
     scheme_name: str,
     status: Optional[bool],
@@ -484,7 +489,7 @@ def _rule_based_scheme_check(
         )
 
     if any(variant in scheme for variant in ("samathuvapuram", "samathuva puram")):
-        if state_value and state_value not in {"tamil nadu", "tamilnadu", "tn"}:
+        if state_value and not _state_matches(state_value, "tamil nadu", "tamilnadu", "tn"):
             return _eligibility_result(
                 "Mukhyamantri Samathuvapuram",
                 False,
@@ -518,7 +523,7 @@ def _rule_based_scheme_check(
         )
 
     if any(variant in scheme for variant in ("raitha sakthi", "raita sakthi", "raitha shakti", "raita shakti")):
-        if state_value and state_value not in {"karnataka", "ka"}:
+        if state_value and not _state_matches(state_value, "karnataka", "ka"):
             return _eligibility_result(
                 "Raitha Sakthi Yojana",
                 False,

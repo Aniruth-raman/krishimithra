@@ -27,6 +27,12 @@ def generate_tracking_id() -> str:
     return f"GRV{year}{random_part}"
 
 
+def enum_value(value) -> Optional[str]:
+    if value is None:
+        return None
+    return str(value.value) if hasattr(value, "value") else str(value)
+
+
 def serialize_officer_grievance(grievance: Grievance, include_updates: bool = False) -> dict:
     due_at = grievance.created_at + timedelta(days=grievance.expected_resolution_days)
     days_remaining = (due_at.date() - datetime.utcnow().date()).days
@@ -39,10 +45,10 @@ def serialize_officer_grievance(grievance: Grievance, include_updates: bool = Fa
     data = {
         "id": grievance.id,
         "tracking_id": grievance.tracking_id,
-        "category": str(grievance.category.value) if hasattr(grievance.category, "value") else str(grievance.category),
+        "category": enum_value(grievance.category),
         "title": grievance.title,
         "description": grievance.description,
-        "status": str(grievance.status.value) if hasattr(grievance.status, "value") else str(grievance.status),
+        "status": enum_value(grievance.status),
         "district": grievance.district,
         "farmer_name": grievance.farmer.full_name if grievance.farmer else None,
         "farmer_phone": grievance.farmer.phone if grievance.farmer else None,
@@ -99,7 +105,7 @@ async def create_grievance(
         title=data.title,
         description=data.description,
         district=district,
-        expected_resolution_days=RESOLUTION_DAYS.get(data.category.value if hasattr(data.category, 'value') else data.category, 30)
+        expected_resolution_days=RESOLUTION_DAYS.get(enum_value(data.category), 30)
     )
     db.add(grievance)
 
@@ -136,10 +142,10 @@ async def track_grievance(
 
     return {
         "tracking_id": grievance.tracking_id,
-        "category": str(grievance.category.value) if grievance.category else None,
+        "category": enum_value(grievance.category),
         "title": grievance.title,
         "description": grievance.description,
-        "status": str(grievance.status.value) if grievance.status else None,
+        "status": enum_value(grievance.status),
         "district": grievance.district,
         "assigned_officer": officer_name,
         "expected_resolution_days": grievance.expected_resolution_days,
@@ -170,9 +176,9 @@ async def get_my_grievances(
         {
             "id": g.id,
             "tracking_id": g.tracking_id,
-            "category": str(g.category.value) if g.category else None,
+            "category": enum_value(g.category),
             "title": g.title,
-            "status": str(g.status.value) if g.status else None,
+            "status": enum_value(g.status),
             "district": g.district,
             "created_at": g.created_at
         }
@@ -282,8 +288,8 @@ async def update_grievance_status(
     update = GrievanceUpdate(
         grievance_id=grievance.id,
         updated_by=current_user.id,
-        old_status=str(old_status.value) if old_status else None,
-        new_status=str(data.status.value) if hasattr(data.status, 'value') else str(data.status),
+        old_status=enum_value(old_status),
+        new_status=enum_value(data.status),
         notes=data.notes
     )
     db.add(update)

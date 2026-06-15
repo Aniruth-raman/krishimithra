@@ -91,6 +91,8 @@ export const api = {
   officerDiseaseReports: () => request("/officer/disease-reports"),
   officerDashboard: () => request("/officer/dashboard"),
   ivrSessions: () => request("/ivr/sessions"),
+  ivrDemoCall: (toNumber) => request("/ivr/twilio/demo-call", { method: "POST", body: { to_number: toNumber } }),
+  ivrDemoScenarioCall: (toNumber, scenario) => request("/ivr/twilio/demo-scenario-call", { method: "POST", body: { to_number: toNumber, scenario } }),
 
   transcribeVoice: (formData) => request("/voice/transcribe", { method: "POST", body: formData }),
   speak: (data) => request("/voice/speak", { method: "POST", body: data }),

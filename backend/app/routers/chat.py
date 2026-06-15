@@ -1,12 +1,19 @@
-﻿import uuid
-from fastapi import APIRouter, Depends, HTTPException
+import re
+import uuid
+
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from typing import List
-from app.database import get_db
-from app.models import User, Conversation, FarmerProfile
-from app.schemas import ChatRequest, ChatResponse
+
 from app.auth import get_current_user
-from app.services.ai.sarvam_ai_service import chat_with_ai, check_scheme_eligibility, classify_intent, get_weather_advisory
+from app.database import get_db
+from app.models import Conversation, Grievance, User
+from app.schemas import ChatRequest, ChatResponse
+from app.services.ai.sarvam_ai_service import (
+    chat_with_ai,
+    check_scheme_eligibility,
+    classify_intent,
+    get_weather_advisory,
+)
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
@@ -19,6 +26,38 @@ SUPPORTED_SCHEMES = [
     "Pradhan Mantri Krishi Sinchayee Yojana",
     "Soil Health Card Scheme",
 ]
+
+
+def extract_tracking_id(message: str) -> str | None:
+    match = re.search(r"\b(GRV\d{8,}|KM-\d{4}-\d{4,})\b", message or "", re.IGNORECASE)
+    return match.group(1).upper() if match else None
+
+
+def format_grievance_tracking_result(grievance: Grievance | None, tracking_id: str) -> str:
+    if not grievance:
+        return (
+            f"I could not find grievance {tracking_id} in this system.\n\n"
+            "Please check the tracking ID once. If this grievance was created here, it should match exactly. "
+            "If it was created from IVR, it may use the KM-2026 format."
+        )
+
+    updates = sorted(grievance.updates or [], key=lambda item: item.created_at, reverse=True)
+    latest_update = updates[0] if updates else None
+    parts = [
+        f"Tracking ID: {grievance.tracking_id}",
+        f"Status: {grievance.status}",
+        f"Title: {grievance.title}",
+        f"Category: {grievance.category}",
+        f"District: {grievance.district or 'Not provided'}",
+        f"Expected resolution: {grievance.expected_resolution_days} days",
+    ]
+    if grievance.resolution_notes:
+        parts.append(f"Resolution notes: {grievance.resolution_notes}")
+    elif latest_update and latest_update.notes:
+        parts.append(f"Latest update: {latest_update.notes}")
+    else:
+        parts.append("Latest update: No officer notes yet.")
+    return "\n".join(parts)
 
 
 def detect_scheme_name(message: str) -> str:
@@ -38,74 +77,178 @@ def detect_scheme_name(message: str) -> str:
     return "PM-KISAN"
 
 
-def format_scheme_result(result: dict) -> str:
+SCHEME_LABELS = {
+    "en": {
+        "eligible": "Eligible",
+        "not_eligible": "Not eligible",
+        "requires_verification": "Needs verification",
+        "assessment": "Eligibility assessment",
+        "reason": "Reason",
+        "benefits": "Benefits",
+        "documents": "Documents required",
+        "next_step": "Next official step",
+        "alternatives": "Alternative schemes",
+        "verify": "Verification notes",
+    },
+    "ta": {
+        "eligible": "தகுதி உள்ளது",
+        "not_eligible": "தகுதி இல்லை",
+        "requires_verification": "சரிபார்ப்பு தேவை",
+        "assessment": "தகுதி மதிப்பீடு",
+        "reason": "காரணம்",
+        "benefits": "நன்மைகள்",
+        "documents": "தேவையான ஆவணங்கள்",
+        "next_step": "அடுத்த அதிகாரப்பூர்வ படி",
+        "alternatives": "மாற்று திட்டங்கள்",
+        "verify": "சரிபார்க்க வேண்டியது",
+    },
+    "hi": {
+        "eligible": "योग्य",
+        "not_eligible": "योग्य नहीं",
+        "requires_verification": "सत्यापन आवश्यक",
+        "assessment": "पात्रता आकलन",
+        "reason": "कारण",
+        "benefits": "लाभ",
+        "documents": "आवश्यक दस्तावेज",
+        "next_step": "अगला आधिकारिक कदम",
+        "alternatives": "वैकल्पिक योजनाएं",
+        "verify": "सत्यापन नोट्स",
+    },
+    "kn": {
+        "eligible": "ಅರ್ಹ",
+        "not_eligible": "ಅರ್ಹರಲ್ಲ",
+        "requires_verification": "ಪರಿಶೀಲನೆ ಅಗತ್ಯ",
+        "assessment": "ಅರ್ಹತಾ ಮೌಲ್ಯಮಾಪನ",
+        "reason": "ಕಾರಣ",
+        "benefits": "ಪ್ರಯೋಜನಗಳು",
+        "documents": "ಅಗತ್ಯ ದಾಖಲೆಗಳು",
+        "next_step": "ಮುಂದಿನ ಅಧಿಕೃತ ಹಂತ",
+        "alternatives": "ಪರ್ಯಾಯ ಯೋಜನೆಗಳು",
+        "verify": "ಪರಿಶೀಲನೆ ಸೂಚನೆಗಳು",
+    },
+}
+
+
+def _scheme_labels(language: str) -> dict:
+    return SCHEME_LABELS.get((language or "en").split("-")[0], SCHEME_LABELS["en"])
+
+
+def format_scheme_result(result: dict, language: str = "en") -> str:
+    base_language = (language or "en").split("-")[0]
+    labels = _scheme_labels(language)
     status = result.get("eligibility_status")
     if status == "eligible":
-        heading = "Eligible"
+        heading = labels["eligible"]
     elif status == "not_eligible":
-        heading = "Not eligible"
+        heading = labels["not_eligible"]
     else:
-        heading = "Needs verification"
+        heading = labels["requires_verification"]
     documents = ", ".join(result.get("required_documents") or [])
     alternatives = ", ".join(result.get("alternative_schemes") or [])
-    parts = [
-        f"{heading}: {result.get('scheme_name')}",
-        result.get("eligibility_reason", ""),
-        f"Benefits: {result.get('benefits', '-')}",
-        f"Documents: {documents or '-'}",
-        f"Next step: {result.get('application_steps', '-')}",
-    ]
-    if alternatives:
-        parts.append(f"Alternatives: {alternatives}")
+    if base_language == "en":
+        parts = [
+            f"{result.get('scheme_name')} looks like: {heading}.",
+            result.get("eligibility_reason", ""),
+            f"You may get: {result.get('benefits', '-')}",
+            f"Keep these documents ready: {documents or '-'}",
+            f"Next, {result.get('application_steps', '-')}",
+        ]
+        if result.get("verification_notes"):
+            parts.append(f"Also verify: {result.get('verification_notes')}")
+        if alternatives:
+            parts.append(f"If this does not work, check: {alternatives}")
+    else:
+        parts = [
+            f"{labels['assessment']}: {heading} - {result.get('scheme_name')}",
+            f"{labels['reason']}: {result.get('eligibility_reason', '-')}",
+            f"{labels['benefits']}: {result.get('benefits', '-')}",
+            f"{labels['documents']}: {documents or '-'}",
+            f"{labels['next_step']}: {result.get('application_steps', '-')}",
+        ]
+        if result.get("verification_notes"):
+            parts.append(f"{labels['verify']}: {result.get('verification_notes')}")
+        if alternatives:
+            parts.append(f"{labels['alternatives']}: {alternatives}")
     return "\n\n".join(part for part in parts if part)
+
+
+def _farmer_context(current_user: User) -> dict:
+    farmer_profile = current_user.farmer_profile
+    if not farmer_profile:
+        return {}
+    return {
+        "district": farmer_profile.district,
+        "primary_crop": farmer_profile.primary_crop,
+        "land_size": farmer_profile.land_size_acres,
+        "state": farmer_profile.state,
+        "farmer_category": farmer_profile.farmer_category,
+        "annual_income": farmer_profile.annual_income,
+    }
+
+
+async def _store_conversation(
+    db: Session,
+    current_user: User,
+    session_id: str,
+    request: ChatRequest,
+    intent: str,
+    response_text: str,
+) -> None:
+    db.add(Conversation(
+        user_id=current_user.id,
+        session_id=session_id,
+        role="user",
+        content=request.message,
+        intent=intent,
+        language=request.language,
+    ))
+    db.add(Conversation(
+        user_id=current_user.id,
+        session_id=session_id,
+        role="assistant",
+        content=response_text,
+        intent=intent,
+        language=request.language,
+    ))
+    db.commit()
 
 
 @router.post("", response_model=ChatResponse)
 async def chat(
     request: ChatRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     session_id = request.session_id or str(uuid.uuid4())
-
-    # Load conversation history for this session
     history_records = (
         db.query(Conversation)
         .filter(
             Conversation.user_id == current_user.id,
-            Conversation.session_id == session_id
+            Conversation.session_id == session_id,
         )
         .order_by(Conversation.created_at.asc())
         .limit(20)
         .all()
     )
+    history = [{"role": record.role, "content": record.content} for record in history_records]
 
-    history = [{"role": r.role, "content": r.content} for r in history_records]
+    tracking_id = extract_tracking_id(request.message)
+    if tracking_id:
+        grievance = db.query(Grievance).filter(Grievance.tracking_id.ilike(tracking_id)).first()
+        intent = "grievance_track"
+        response_text = format_grievance_tracking_result(grievance, tracking_id)
+        await _store_conversation(db, current_user, session_id, request, intent, response_text)
+        return ChatResponse(response=response_text, intent=intent, session_id=session_id)
 
-    # Classify intent
     intent = await classify_intent(request.message)
+    context = _farmer_context(current_user)
 
-    # Build context from farmer profile
-    context = {}
-    farmer_profile = current_user.farmer_profile
-    if farmer_profile:
-        p = farmer_profile
-        context = {
-            "district": p.district,
-            "primary_crop": p.primary_crop,
-            "land_size": p.land_size_acres,
-            "state": p.state,
-            "farmer_category": p.farmer_category,
-            "annual_income": p.annual_income,
-        }
-
-    # Route to specific handler or general AI
     if intent == "weather" and context.get("district"):
         response_text = await get_weather_advisory(
             crop_type=context.get("primary_crop", "crop"),
             district=context.get("district", "your district"),
             query=request.message,
-            language=request.language
+            language=request.language,
         )
     elif intent == "scheme":
         scheme_result = await check_scheme_eligibility(
@@ -116,39 +259,17 @@ async def chat(
             annual_income=context.get("annual_income"),
             language=request.language,
         )
-        response_text = format_scheme_result(scheme_result)
+        response_text = format_scheme_result(scheme_result, request.language)
     else:
         response_text = await chat_with_ai(
             message=request.message,
             history=history,
             language=request.language,
-            context=context if context else None
+            context=context if context else None,
         )
 
-    # Store conversation
-    db.add(Conversation(
-        user_id=current_user.id,
-        session_id=session_id,
-        role="user",
-        content=request.message,
-        intent=intent,
-        language=request.language
-    ))
-    db.add(Conversation(
-        user_id=current_user.id,
-        session_id=session_id,
-        role="assistant",
-        content=response_text,
-        intent=intent,
-        language=request.language
-    ))
-    db.commit()
-
-    return ChatResponse(
-        response=response_text,
-        intent=intent,
-        session_id=session_id
-    )
+    await _store_conversation(db, current_user, session_id, request, intent, response_text)
+    return ChatResponse(response=response_text, intent=intent, session_id=session_id)
 
 
 @router.get("/history")
@@ -156,7 +277,7 @@ async def get_chat_history(
     session_id: str = None,
     limit: int = 50,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     query = db.query(Conversation).filter(Conversation.user_id == current_user.id)
     if session_id:
@@ -164,29 +285,29 @@ async def get_chat_history(
     messages = query.order_by(Conversation.created_at.desc()).limit(limit).all()
     return [
         {
-            "id": m.id,
-            "role": m.role,
-            "content": m.content,
-            "intent": m.intent,
-            "session_id": m.session_id,
-            "created_at": m.created_at
+            "id": message.id,
+            "role": message.role,
+            "content": message.content,
+            "intent": message.intent,
+            "session_id": message.session_id,
+            "created_at": message.created_at,
         }
-        for m in reversed(messages)
+        for message in reversed(messages)
     ]
 
 
 @router.get("/sessions")
 async def get_sessions(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
-    """Get list of chat sessions for current user."""
-    from sqlalchemy import func, distinct
+    from sqlalchemy import func
+
     sessions = (
         db.query(
             Conversation.session_id,
             func.min(Conversation.created_at).label("started_at"),
-            func.count(Conversation.id).label("message_count")
+            func.count(Conversation.id).label("message_count"),
         )
         .filter(Conversation.user_id == current_user.id)
         .group_by(Conversation.session_id)
@@ -194,4 +315,4 @@ async def get_sessions(
         .limit(20)
         .all()
     )
-    return [{"session_id": s.session_id, "started_at": s.started_at, "message_count": s.message_count} for s in sessions]
+    return [{"session_id": session.session_id, "started_at": session.started_at, "message_count": session.message_count} for session in sessions]

@@ -1,10 +1,11 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { BarChart3, Bot, Home, LogOut, Shield, UserCog } from "lucide-react";
+import { BarChart3, Bot, Home, LogOut, Mic, PhoneCall, Shield, UserCog } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 
 const farmerLinks = [
   { to: "/", label: "Dashboard", icon: Home },
   { to: "/assistant", label: "AI Assistant", icon: Bot },
+  { to: "/voice-live", label: "Live Voice", icon: Mic },
   { to: "/profile", label: "Profile", icon: UserCog },
 ];
 
@@ -14,6 +15,7 @@ const officerLinks = [
 
 const adminLinks = [
   { to: "/admin", label: "Admin Console", icon: Shield },
+  { to: "/admin/ivr-simulator", label: "IVR Simulator", icon: PhoneCall },
 ];
 
 export default function Layout() {

@@ -21,16 +21,33 @@ LANGUAGE_NAMES = {
     "kn-IN": "Kannada",
 }
 
-SYSTEM_PROMPT_FARMER = """You are KrishiMitra AI, an expert agricultural assistant for Indian farmers.
-You help with crop disease diagnosis, pest control, weather-based farming advice,
-government scheme eligibility, yield optimization, and grievance guidance.
+SYSTEM_PROMPT_FARMER = """You are KrishiMitra AI, an enterprise-grade agricultural decision-support assistant for Indian farmers, FPOs, and field extension teams.
 
-Rules:
-- Always answer in the requested language.
-- Use simple farmer-friendly words.
-- Keep advice practical and actionable.
-- Consider Indian farming context, especially South Indian crops like rice, sugarcane, banana, cotton, groundnut, and vegetables.
-- When giving treatment advice, include dosage only when you are confident; otherwise ask the farmer to confirm with a local agriculture officer.
+Core mandate:
+- Provide technically sound, practical, and locally relevant agricultural guidance for India.
+- Cover crop health, pest and disease triage, fertilizer and irrigation planning, weather-risk decisions, government schemes, market/grievance navigation, and yield improvement.
+- Prioritize South Indian farming contexts when relevant, including rice, sugarcane, banana, cotton, groundnut, millets, pulses, coconut, and vegetables.
+
+Response quality standard:
+- Answer only in the requested language and keep the tone respectful, confident, and farmer-friendly.
+- Sound natural, like a knowledgeable agriculture officer speaking to the farmer, not like a template.
+- Start with the most useful answer, then give clear next actions.
+- Use short paragraphs. Use bullets only when they genuinely make the answer easier to follow.
+- Do not use markdown decorations, bold markers, hash headings, tables, or robotic labels unless the user asks for a formal report.
+- Avoid over-polished corporate phrasing, long introductions, and repeated disclaimers.
+- Ask for missing critical details only when they materially change the recommendation, such as crop, stage, district, irrigation status, symptoms, acreage, or recent pesticide/fertilizer use.
+- Distinguish facts from assumptions. If context is incomplete, state the assumption briefly and provide a safe next step.
+- Do not fabricate live weather, market prices, scheme rules, laboratory results, pesticide labels, or official deadlines.
+
+Agronomy and safety rules:
+- For pests, diseases, and nutrient problems, provide symptom-based triage and integrated pest management first: field inspection, sanitation, water management, resistant varieties, traps, biological options, and threshold-based action.
+- Give chemical pesticide, fungicide, herbicide, fertilizer, or growth-regulator dosage only when the product, crop, target issue, formulation, and local label context are clear. Otherwise advise label verification and local agriculture officer/KVK confirmation.
+- Mention pre-harvest interval, protective equipment, wind/rain precautions, and safe storage whenever chemical spraying is discussed.
+- Recommend urgent escalation to the agriculture department, KVK, veterinary/medical help, or emergency services when there is severe crop loss, suspected poisoning, animal/human health risk, unknown chemical exposure, or rapidly spreading disease.
+
+Government and grievance rules:
+- For schemes, clearly classify eligibility as eligible, not eligible, or needs verification. Explain the reason, documents, benefits, and next official step.
+- For grievances, provide a professional escalation path, documents to collect, and how to phrase the complaint without blaming unsupported parties.
 """
 
 
@@ -39,7 +56,10 @@ def _language_name(language: str) -> str:
 
 
 def _language_instruction(language: str) -> str:
-    return f"Respond only in {_language_name(language)}. Do not mix languages unless the user asks."
+    return (
+        f"Response language: {_language_name(language)} only. "
+        "Use natural local phrasing, translate headings when possible, and keep official scheme/product names unchanged when translation may reduce clarity."
+    )
 
 
 def _basic_sentence_format(text: str, language: str = "en") -> str:
@@ -63,9 +83,18 @@ def _basic_sentence_format(text: str, language: str = "en") -> str:
     return cleaned
 
 
-async def format_transcript_text(text: str, language: str = "en") -> str:
+def _clean_ai_response(text: str) -> str:
+    cleaned = (text or "").strip()
+    cleaned = re.sub(r"\*\*(.*?)\*\*", r"\1", cleaned)
+    cleaned = re.sub(r"(?m)^\s{0,3}#{1,6}\s*", "", cleaned)
+    cleaned = re.sub(r"(?m)^\s*[*]\s+", "- ", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
+async def format_transcript_text(text: str, language: str = "en", use_ai: bool = True) -> str:
     fallback = _basic_sentence_format(text, language)
-    if not settings.SARVAM_API_KEY or not settings.VOICE_ENABLE_AI_FORMATTING:
+    if not use_ai or not settings.SARVAM_API_KEY or not settings.VOICE_ENABLE_AI_FORMATTING:
         return fallback
 
     try:
@@ -74,8 +103,10 @@ async def format_transcript_text(text: str, language: str = "en") -> str:
                 {
                     "role": "system",
                     "content": (
-                        "You format speech-to-text transcripts. Add only punctuation, sentence breaks, "
-                        "capitalization, and obvious spacing. Do not add facts. Do not answer the question. "
+                        "You are a transcript normalization engine for an agricultural voice assistant. "
+                        "Correct only punctuation, sentence boundaries, capitalization, and obvious spacing. "
+                        "Preserve the speaker's meaning, language, numbers, crop names, locations, and uncertainty exactly. "
+                        "Do not add facts, infer missing words, translate, summarize, or answer the query. "
                         f"{_language_instruction(language)}"
                     ),
                 },
@@ -203,8 +234,8 @@ async def diagnose_sarvam() -> Dict[str, Any]:
         }
 
 
-async def classify_intent(message: str) -> str:
-    if not settings.SARVAM_API_KEY:
+async def classify_intent(message: str, fast: bool = False) -> str:
+    if fast or not settings.SARVAM_API_KEY:
         return _fallback_intent(message)
 
     try:
@@ -212,15 +243,17 @@ async def classify_intent(message: str) -> str:
             messages=[
                 {
                     "role": "system",
-                    "content": """Classify the farmer query into exactly one category:
-- disease: crop disease, pest, plant health issues
-- weather: weather, rain, pesticide spraying timing
-- scheme: government schemes, subsidies, PM-KISAN, eligibility
-- grievance: complaints, issues with government, delays
-- yield: crop yield, fertilizer, irrigation advice
-- general: everything else
+                    "content": """You are an intent classifier for KrishiMitra AI.
 
-Reply with only one lowercase category word.""",
+Classify the farmer's latest message into exactly one category:
+- disease: crop disease, pest, weed, nutrient deficiency, leaf/fruit/root/stem symptoms, diagnosis, treatment, pesticide/fungicide questions
+- weather: rain, wind, humidity, temperature, spraying window, irrigation timing based on weather, storm/drought/flood risk
+- scheme: government schemes, subsidies, PM-KISAN, PMFBY, KCC, eligibility, documents, application status
+- grievance: complaint filing, delayed payment, rejected application, insurance claim dispute, official escalation, market/government service issue
+- yield: fertilizer schedule, irrigation schedule, spacing, crop stage management, productivity improvement, soil health, cultivation practice
+- general: greetings, unclear requests, app help, or anything not covered above
+
+Return only one lowercase category word. No punctuation, explanation, or extra text.""",
                 },
                 {"role": "user", "content": message},
             ],
@@ -260,12 +293,13 @@ async def chat_with_ai(
     if channel in {"ivr", "voice"}:
         system += """
 
-Spoken voice rules:
-- This answer will be spoken aloud to a farmer.
-- Keep it under 5 short, natural sentences.
-- Do not use markdown, tables, bullet symbols, or long lists.
-- Ask one simple follow-up question only if required for safety.
-- If the issue sounds urgent or uncertain, suggest contacting the local agriculture officer."""
+Voice response contract:
+- The response will be spoken aloud in real time, so optimize for speed and clarity.
+- Use 2 to 4 short, natural sentences with no markdown, tables, symbols, or numbered lists.
+- Lead with the answer in the first sentence, then give one or two practical actions.
+- Avoid long introductions, repeated disclaimers, and deep background explanation.
+- Ask only one follow-up question when the answer would otherwise be unsafe or misleading.
+- If the issue is urgent, uncertain, chemical-related, or severe, recommend local agriculture officer or KVK verification."""
     if context:
         system += f"\n\nFarmer context: {json.dumps(context, ensure_ascii=False)}"
 
@@ -273,8 +307,10 @@ Spoken voice rules:
         messages = [{"role": "system", "content": system}]
         messages.extend(history[-10:])
         messages.append({"role": "user", "content": message})
-        max_tokens = 500 if channel in {"ivr", "voice"} else 2048
-        return await _sarvam_chat(messages=messages, max_tokens=max_tokens, temperature=0.7)
+        max_tokens = 320 if channel in {"ivr", "voice"} else 1400
+        temperature = 0.35 if channel in {"ivr", "voice"} else 0.55
+        content = await _sarvam_chat(messages=messages, max_tokens=max_tokens, temperature=temperature)
+        return _clean_ai_response(content)
     except Exception as error:
         print(f"Sarvam chat_with_ai failed: {error}")
         return _friendly_sarvam_error(error, language)
@@ -302,7 +338,7 @@ async def check_scheme_eligibility(
         return rule_result
 
     try:
-        prompt = f"""Check eligibility for this Indian agricultural scheme.
+        prompt = f"""Evaluate eligibility for this Indian agricultural scheme using a high-accuracy, official-process-oriented standard.
 Scheme: {scheme_name}
 State: {state}
 Land ownership: {land_ownership}
@@ -310,11 +346,27 @@ Farmer category: {farmer_category}
 Annual income: {annual_income}
 
 Return only valid JSON with these keys:
-is_eligible (boolean), eligibility_reason, benefits, required_documents (array), alternative_schemes (array), application_steps.
+is_eligible (true, false, or null when verification is required),
+eligibility_status ("eligible", "not_eligible", or "requires_verification"),
+eligibility_reason,
+benefits,
+required_documents (array),
+alternative_schemes (array),
+application_steps,
+verification_notes.
+
+Do not invent state-specific rules, deadlines, benefit amounts, or portal status. If the supplied details are insufficient, mark eligibility_status as "requires_verification" and explain what to verify.
 All text values must be in {_language_name(language)}."""
         content = await _sarvam_chat(
             messages=[
-                {"role": "system", "content": f"You are an expert on Indian agricultural government schemes. {_language_instruction(language)}"},
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a senior Indian agricultural scheme eligibility analyst. "
+                        "Use cautious, official-process-oriented reasoning and return strict JSON only. "
+                        f"{_language_instruction(language)}"
+                    ),
+                },
                 {"role": "user", "content": prompt},
             ],
             max_tokens=2048,
@@ -515,21 +567,34 @@ async def get_weather_advisory(
     }
 
     try:
-        prompt = f"""Farmer query: {query}
+        prompt = f"""Prepare a weather-risk advisory for the farmer.
+Farmer query: {query}
 District: {district}
 Crop: {crop_type}
 Current weather: Temperature {weather['temperature']}°C, humidity {weather['humidity']}%, rainfall {weather['rainfall_mm']} mm, wind {weather['wind_speed_kmh']} km/h.
 3-day forecast: {weather['forecast_3days']}
 
-Give specific weather-based farming advice. {_language_instruction(language)}"""
-        return await _sarvam_chat(
+Give a concise but technically strong advisory:
+- State the decision first, especially whether to irrigate, spray, delay spraying, drain water, or monitor.
+- Explain the weather risk in farmer-friendly terms.
+- Include safe spray guidance when relevant: rain gap, wind caution, protective equipment, and label verification.
+- Do not claim this is live weather; use only the weather values provided above.
+{_language_instruction(language)}"""
+        content = await _sarvam_chat(
             messages=[
-                {"role": "system", "content": "You are an agricultural weather advisor for Indian farmers."},
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a senior agrometeorology advisor for Indian farming conditions. "
+                        "Provide cautious, actionable, crop-stage-aware weather advice without inventing unavailable forecast data."
+                    ),
+                },
                 {"role": "user", "content": prompt},
             ],
             max_tokens=1200,
             temperature=0.4,
         )
+        return _clean_ai_response(content)
     except Exception as error:
         print(f"Sarvam get_weather_advisory failed: {error}")
         return _mock_weather_advisory(crop_type, district, weather, language)

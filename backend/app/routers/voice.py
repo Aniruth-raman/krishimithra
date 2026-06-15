@@ -4,10 +4,15 @@ from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, R
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import User, Conversation
+from app.models import User, Conversation, Grievance
 from app.schemas import VoiceTranscribeOut, VoiceSpeakRequest
 from app.auth import get_current_user
-from app.routers.chat import detect_scheme_name, format_scheme_result
+from app.routers.chat import (
+    detect_scheme_name,
+    extract_tracking_id,
+    format_grievance_tracking_result,
+    format_scheme_result,
+)
 from app.config import settings
 from app.services.ai.sarvam_ai_service import (
     chat_with_ai,
@@ -23,15 +28,18 @@ router = APIRouter(prefix="/voice", tags=["Voice"])
 LANGUAGE_TO_AUDIO_CODE = {
     "ta": "ta-IN",
     "kn": "kn-IN",
+    "hi": "hi-IN",
     "en": "en-IN",
     "ta-IN": "ta-IN",
     "kn-IN": "kn-IN",
+    "hi-IN": "hi-IN",
     "en-IN": "en-IN",
 }
 
 AUDIO_TO_CHAT_LANGUAGE = {
     "ta-IN": "ta",
     "kn-IN": "kn",
+    "hi-IN": "hi",
     "en-IN": "en",
 }
 
@@ -41,7 +49,7 @@ def _audio_language(language: str) -> str:
 
 
 def _chat_language(language: str) -> str:
-    return AUDIO_TO_CHAT_LANGUAGE.get(_audio_language(language), language if language in {"ta", "kn", "en"} else "en")
+    return AUDIO_TO_CHAT_LANGUAGE.get(_audio_language(language), language if language in {"ta", "kn", "hi", "en"} else "en")
 
 
 def _farmer_context(user: User) -> dict:
@@ -58,7 +66,7 @@ def _farmer_context(user: User) -> dict:
     }
 
 
-async def _read_text_payload(request: Request) -> tuple[str, str, str | None]:
+async def _read_text_payload(request: Request) -> tuple[str, str, str | None, bool]:
     content_type = request.headers.get("content-type", "")
     payload = {}
     if "multipart/form-data" in content_type or "application/x-www-form-urlencoded" in content_type:
@@ -70,11 +78,42 @@ async def _read_text_payload(request: Request) -> tuple[str, str, str | None]:
         form = await request.form()
         payload = dict(form) if form else dict(request.query_params)
 
-    text = str(payload.get("text") or payload.get("message") or "").strip()
+    text = str(
+        payload.get("text")
+        or payload.get("message")
+        or payload.get("transcript")
+        or payload.get("query")
+        or ""
+    ).strip()
+    if text.lower() in {"undefined", "null", "none"}:
+        text = ""
     language = str(payload.get("language") or "en").strip()
     session_id_value = payload.get("session_id")
     session_id = str(session_id_value).strip() if session_id_value else None
-    return text, language, session_id
+    fast_response_value = payload.get("fast_response") or request.query_params.get("fast_response") or ""
+    fast_response = str(fast_response_value).strip().lower() in {"1", "true", "yes", "on"}
+    return text, language, session_id, fast_response
+
+
+def _empty_voice_response(language: str, session_id: str) -> dict:
+    chat_language = _chat_language(language)
+    messages = {
+        "ta": "உங்கள் குரல் தெளிவாக கேட்கவில்லை. தயவுசெய்து மைக்கிற்கு அருகில் மீண்டும் பேசுங்கள்.",
+        "kn": "ನಿಮ್ಮ ಧ್ವನಿ ಸ್ಪಷ್ಟವಾಗಿ ಕೇಳಿಸಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮೈಕ್ ಹತ್ತಿರ ಮತ್ತೆ ಮಾತನಾಡಿ.",
+        "hi": "आपकी आवाज साफ सुनाई नहीं दी। कृपया माइक्रोफोन के पास फिर से बोलें।",
+        "en": "I could not hear that clearly. Please speak again closer to the microphone.",
+    }
+    return {
+        "transcript": "",
+        "response": messages.get(chat_language, messages["en"]),
+        "intent": "voice",
+        "session_id": session_id,
+        "language": chat_language,
+        "audio_language": _audio_language(language),
+        "audio_base64": None,
+        "audio_mime_type": None,
+        "tts_available": False,
+    }
 
 
 async def _assistant_response(
@@ -94,7 +133,31 @@ async def _assistant_response(
         .all()
     )
     history = [{"role": record.role, "content": record.content} for record in history_records]
-    intent = await classify_intent(message)
+    tracking_id = extract_tracking_id(message)
+    if tracking_id:
+        grievance = db.query(Grievance).filter(Grievance.tracking_id.ilike(tracking_id)).first()
+        response_text = format_grievance_tracking_result(grievance, tracking_id)
+        intent = "grievance_track"
+        db.add(Conversation(
+            user_id=current_user.id,
+            session_id=session_id,
+            role="user",
+            content=message,
+            intent=intent,
+            language=language,
+        ))
+        db.add(Conversation(
+            user_id=current_user.id,
+            session_id=session_id,
+            role="assistant",
+            content=response_text,
+            intent=intent,
+            language=language,
+        ))
+        db.commit()
+        return response_text, intent
+
+    intent = await classify_intent(message, fast=voice_mode)
     context = _farmer_context(current_user)
 
     if intent == "weather" and context.get("district"):
@@ -113,7 +176,7 @@ async def _assistant_response(
             annual_income=context.get("annual_income"),
             language=language,
         )
-        response_text = format_scheme_result(scheme_result)
+        response_text = format_scheme_result(scheme_result, language)
     else:
         response_text = await chat_with_ai(
             message=message,
@@ -197,6 +260,7 @@ async def voice_conversation(
     audio: UploadFile = File(...),
     language: str = Form("en"),
     session_id: str | None = Form(None),
+    fast_response: bool = Form(False),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -215,8 +279,8 @@ async def voice_conversation(
     transcription = await transcribe_audio(content, audio_language, audio.filename)
     raw_transcript = (transcription.get("transcript") or "").strip()
     if not raw_transcript:
-        raise HTTPException(status_code=400, detail="Could not hear clear speech. Please try again closer to the microphone.")
-    transcript = await format_transcript_text(raw_transcript, chat_language)
+        return _empty_voice_response(language, resolved_session_id)
+    transcript = await format_transcript_text(raw_transcript, chat_language, use_ai=not fast_response)
 
     response_text, intent = await _assistant_response(
         db=db,
@@ -227,8 +291,8 @@ async def voice_conversation(
         voice_mode=True,
     )
 
-    tts_text = response_text[:900]
-    audio_bytes = await text_to_speech(tts_text, audio_language)
+    tts_text = response_text[:650]
+    audio_bytes = None if fast_response else await text_to_speech(tts_text, audio_language)
     audio_base64 = base64.b64encode(audio_bytes).decode("utf-8") if audio_bytes else None
 
     return {
@@ -252,16 +316,16 @@ async def voice_text_response(
     db: Session = Depends(get_db),
 ):
     """Respond to already-transcribed voice text and return Sarvam TTS audio."""
-    text, language, session_id = await _read_text_payload(request)
-    if not text:
-        raise HTTPException(status_code=400, detail="Text is required.")
-
+    text, language, session_id, fast_response = await _read_text_payload(request)
     resolved_session_id = session_id or str(uuid.uuid4())
+    if not text:
+        return _empty_voice_response(language, resolved_session_id)
+
     chat_language = _chat_language(language)
     audio_language = _audio_language(language)
-    formatted_text = await format_transcript_text(text, chat_language)
+    formatted_text = await format_transcript_text(text, chat_language, use_ai=not fast_response)
     if not formatted_text:
-        raise HTTPException(status_code=400, detail="Text is empty.")
+        return _empty_voice_response(language, resolved_session_id)
 
     response_text, intent = await _assistant_response(
         db=db,
@@ -271,7 +335,7 @@ async def voice_text_response(
         session_id=resolved_session_id,
         voice_mode=True,
     )
-    audio_bytes = await text_to_speech(response_text[:900], audio_language)
+    audio_bytes = None if fast_response else await text_to_speech(response_text[:650], audio_language)
     audio_base64 = base64.b64encode(audio_bytes).decode("utf-8") if audio_bytes else None
 
     return {

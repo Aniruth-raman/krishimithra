@@ -122,6 +122,8 @@ class DiseaseReport(Base, TimestampMixin):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     treatment: Mapped[str | None] = mapped_column(Text, nullable=True)
     district: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    status: Mapped[str] = mapped_column(String(60), default="completed", index=True)
+    analysis_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     user = relationship("User", back_populates="disease_reports")
 

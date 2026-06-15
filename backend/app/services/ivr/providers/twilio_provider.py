@@ -87,5 +87,7 @@ class TwilioProvider(MockTelephonyProvider):
     def _play_or_say(self, audio_url: str | None, escaped_prompt: str, public_base_url: str) -> str:
         if audio_url:
             source = audio_url if audio_url.startswith("http") else f"{public_base_url.rstrip('/')}{audio_url}"
-            return f"<Play>{escape(source)}</Play>"
-        return f"<Say>{escaped_prompt}</Say>"
+            if source.strip():
+                return f"<Play>{escape(source)}</Play>"
+        prompt = escaped_prompt.strip() or "Welcome to KrishiMitra. Please wait while we connect the service."
+        return f"<Say>{prompt}</Say>"

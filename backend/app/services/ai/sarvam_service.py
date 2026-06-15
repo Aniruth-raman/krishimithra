@@ -12,9 +12,11 @@ SARVAM_BASE_URL = "https://api.sarvam.ai"
 LANGUAGE_CODE_MAP = {
     "ta": "ta-IN",
     "kn": "kn-IN",
+    "hi": "hi-IN",
     "en": "en-IN",
     "ta-IN": "ta-IN",
     "kn-IN": "kn-IN",
+    "hi-IN": "hi-IN",
     "en-IN": "en-IN",
 }
 

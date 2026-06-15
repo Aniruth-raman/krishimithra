@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { ClipboardList, Landmark, Leaf, Loader2, Mic, Plus, Radio, Send, Sparkles, Square, Volume2, X } from "lucide-react";
 import { api } from "../api/client";
@@ -7,20 +7,24 @@ import { useAuth } from "../context/AuthContext";
 
 const languages = [
   { value: "ta", label: "Tamil" },
+  { value: "hi", label: "Hindi" },
   { value: "kn", label: "Kannada" },
   { value: "en", label: "English" },
 ];
 
 const voiceLanguages = {
   ta: "ta-IN",
+  hi: "hi-IN",
   kn: "kn-IN",
   en: "en-IN",
 };
 
+const grievanceCategories = ["Subsidy Delay", "Crop Loss", "Insurance", "Irrigation", "Market Rate Issue"];
+
 const addOptions = [
-  { label: "Crop disease", prompt: "My crop has yellow leaves and spots. What should I check first?", icon: Leaf },
-  { label: "Scheme query", prompt: "Check which government schemes I may be eligible for.", icon: Landmark },
-  { label: "Grievance help", prompt: "Help me write and track an agriculture department grievance.", icon: ClipboardList },
+  { label: "Crop disease", prompt: "My crop has yellow leaves and spots. What should I check first?", icon: Leaf, type: "prompt" },
+  { label: "Scheme query", prompt: "Check which government schemes I may be eligible for.", icon: Landmark, type: "prompt" },
+  { label: "Create grievance", icon: ClipboardList, type: "grievance" },
 ];
 
 export default function ChatPage() {
@@ -35,6 +39,14 @@ export default function ChatPage() {
   const [voiceState, setVoiceState] = useState("idle");
   const [liveMode, setLiveMode] = useState(false);
   const [liveProvider, setLiveProvider] = useState("");
+  const [grievanceOpen, setGrievanceOpen] = useState(false);
+  const [grievanceLoading, setGrievanceLoading] = useState(false);
+  const [grievanceForm, setGrievanceForm] = useState({
+    category: grievanceCategories[0],
+    title: "",
+    description: "",
+    district: "",
+  });
   const [error, setError] = useState("");
   const inputRef = useRef(null);
   const recorderRef = useRef(null);
@@ -42,6 +54,22 @@ export default function ChatPage() {
   const chunksRef = useRef([]);
   const audioRef = useRef(null);
   const liveModeRef = useRef(false);
+  const audioContextRef = useRef(null);
+  const analyserRef = useRef(null);
+  const vadFrameRef = useRef(null);
+  const speechStartedRef = useRef(false);
+  const silenceStartedAtRef = useRef(null);
+  const recordingStartedAtRef = useRef(0);
+  const cancelRecordingRef = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      setLiveEnabled(false);
+      stopVoice(true);
+      audioRef.current?.pause();
+      window.speechSynthesis?.cancel();
+    };
+  }, []);
 
   function setLiveEnabled(enabled) {
     liveModeRef.current = enabled;
@@ -51,10 +79,10 @@ export default function ChatPage() {
 
   function voiceStatusLabel() {
     const labels = {
-      listening: "Listening... tap again to stop",
-      transcribing: "Converting voice to formatted text...",
-      thinking: "Starting AI response...",
-      speaking: "Speaking response...",
+      listening: liveMode ? "Listening... speak now" : "Listening... speak and pause",
+      transcribing: "Understanding your voice...",
+      thinking: "Preparing a quick reply...",
+      speaking: "Speaking now...",
     };
     const providerLabel = liveMode && liveProvider ? ` Live: ${liveProvider}` : "";
     return `${labels[voiceState] || ""}${providerLabel}`;
@@ -74,17 +102,88 @@ export default function ChatPage() {
     return new Blob([bytes], { type: mimeType });
   }
 
+  function cleanupVoiceDetection() {
+    if (vadFrameRef.current) {
+      window.cancelAnimationFrame(vadFrameRef.current);
+      vadFrameRef.current = null;
+    }
+    audioContextRef.current?.close().catch(() => {});
+    audioContextRef.current = null;
+    analyserRef.current = null;
+    silenceStartedAtRef.current = null;
+  }
+
+  function stopRecorderForVad(recorder) {
+    if (recorder?.state === "recording") {
+      recorder.stop();
+    }
+  }
+
+  function startVoiceDetection(stream, recorder) {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+
+    const audioContext = new AudioContext();
+    const source = audioContext.createMediaStreamSource(stream);
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 1024;
+    analyser.smoothingTimeConstant = 0.2;
+    source.connect(analyser);
+    audioContextRef.current = audioContext;
+    analyserRef.current = analyser;
+
+    const data = new Uint8Array(analyser.fftSize);
+    const speechThreshold = 14;
+    const silenceMs = 650;
+    const minSpeechMs = 350;
+    const noSpeechTimeoutMs = 9000;
+
+    function checkVoice() {
+      analyser.getByteTimeDomainData(data);
+      let sum = 0;
+      for (let index = 0; index < data.length; index += 1) {
+        const value = data[index] - 128;
+        sum += value * value;
+      }
+      const volume = Math.sqrt(sum / data.length);
+      const now = Date.now();
+
+      if (volume > speechThreshold) {
+        speechStartedRef.current = true;
+        silenceStartedAtRef.current = null;
+      } else if (speechStartedRef.current) {
+        if (!silenceStartedAtRef.current) silenceStartedAtRef.current = now;
+        const speechDuration = now - recordingStartedAtRef.current;
+        const silenceDuration = now - silenceStartedAtRef.current;
+        if (speechDuration > minSpeechMs && silenceDuration > silenceMs) {
+          stopRecorderForVad(recorder);
+          return;
+        }
+      } else if (now - recordingStartedAtRef.current > noSpeechTimeoutMs) {
+        stopRecorderForVad(recorder);
+        return;
+      }
+
+      vadFrameRef.current = window.requestAnimationFrame(checkVoice);
+    }
+
+    vadFrameRef.current = window.requestAnimationFrame(checkVoice);
+  }
+
   function browserSpeak(text) {
     if (!window.speechSynthesis || !text) return false;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = voiceLanguages[language] || "en-IN";
-    utterance.rate = 0.95;
+    utterance.rate = 1.03;
     utterance.onend = () => {
       setVoiceState("idle");
       if (liveModeRef.current) startVoice().catch((err) => setError(err.message));
     };
-    utterance.onerror = () => setVoiceState("idle");
+    utterance.onerror = () => {
+      setVoiceState("idle");
+      if (liveModeRef.current) startVoice().catch((err) => setError(err.message));
+    };
     window.speechSynthesis.speak(utterance);
     return true;
   }
@@ -103,12 +202,73 @@ export default function ChatPage() {
           if (liveModeRef.current) startVoice().catch((err) => setError(err.message));
         };
         await audioRef.current.play();
+        return true;
       }
     } catch (err) {
       URL.revokeObjectURL(audioUrl);
-      setError(err.message);
       setVoiceState("idle");
+      return false;
     }
+    URL.revokeObjectURL(audioUrl);
+    setVoiceState("idle");
+    return false;
+  }
+
+  function inferGrievanceCategory(text) {
+    const value = (text || "").toLowerCase();
+    if (["insurance", "claim", "premium", "pmfby", "bima"].some((word) => value.includes(word))) return "Insurance";
+    if (["crop loss", "damage", "flood", "drought", "destroyed", "loss"].some((word) => value.includes(word))) return "Crop Loss";
+    if (["water", "canal", "irrigation", "pump"].some((word) => value.includes(word))) return "Irrigation";
+    if (["price", "market", "msp", "rate", "buyer"].some((word) => value.includes(word))) return "Market Rate Issue";
+    return "Subsidy Delay";
+  }
+
+  function draftGrievanceTitle(text) {
+    const cleaned = (text || "").replace(/\s+/g, " ").trim();
+    if (!cleaned) return "";
+    const firstSentence = cleaned.split(/[.!?]/)[0].trim();
+    return (firstSentence || cleaned).slice(0, 90);
+  }
+
+  function cleanAssistantText(text) {
+    return (text || "")
+      .replace(/\*\*(.*?)\*\*/g, "$1")
+      .replace(/\[(.*?)\]\((.*?)\)/g, "$1 ($2)")
+      .trim();
+  }
+
+  function renderMessageContent(content) {
+    const lines = String(content || "").split("\n");
+    return (
+      <div className="message-content">
+        {lines.map((line, index) => {
+          const trimmed = line.trim();
+          if (!trimmed) return null;
+          if (trimmed.startsWith("### ")) {
+            return <h4 key={`${index}-${trimmed}`}>{cleanAssistantText(trimmed.slice(4))}</h4>;
+          }
+          if (trimmed.startsWith("## ")) {
+            return <h4 key={`${index}-${trimmed}`}>{cleanAssistantText(trimmed.slice(3))}</h4>;
+          }
+          if (/^[-*]\s+/.test(trimmed)) {
+            return <p className="message-bullet" key={`${index}-${trimmed}`}>{cleanAssistantText(trimmed.replace(/^[-*]\s+/, ""))}</p>;
+          }
+          return <p key={`${index}-${trimmed}`}>{cleanAssistantText(trimmed)}</p>;
+        })}
+      </div>
+    );
+  }
+
+  function openGrievanceForm(seedText = "") {
+    const cleaned = (seedText || "").trim();
+    setGrievanceForm((current) => ({
+      ...current,
+      category: inferGrievanceCategory(cleaned),
+      title: draftGrievanceTitle(cleaned) || current.title,
+      description: cleaned || current.description,
+    }));
+    setGrievanceOpen(true);
+    setAddOpen(false);
   }
 
   function choosePrompt(prompt) {
@@ -117,13 +277,48 @@ export default function ChatPage() {
     inputRef.current?.focus();
   }
 
+  function chooseAddOption(option) {
+    if (option.type === "grievance") {
+      openGrievanceForm(message);
+      return;
+    }
+    choosePrompt(option.prompt);
+  }
+
+  async function submitGrievance(event) {
+    event.preventDefault();
+    setError("");
+    setGrievanceLoading(true);
+    try {
+      const response = await api.createGrievance(grievanceForm);
+      setMessages((items) => [
+        ...items,
+        {
+          role: "assistant",
+          intent: "grievance",
+          content: `Grievance report created.\nTracking ID: ${response.tracking_id}\nStatus: ${response.status}\nExpected resolution: ${response.expected_resolution_days} days`,
+        },
+      ]);
+      setGrievanceOpen(false);
+      setGrievanceForm({ category: grievanceCategories[0], title: "", description: "", district: "" });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setGrievanceLoading(false);
+    }
+  }
+
   async function playResponse(text) {
     setVoiceState("speaking");
     setError("");
     try {
       const speechText = text.length > 4800 ? text.slice(0, 4800) : text;
       const blob = await api.speak({ text: speechText, language: voiceLanguages[language] || "en-IN" });
-      await playBlob(blob);
+      const played = await playBlob(blob);
+      if (!played && !browserSpeak(text)) {
+        setError("Audio playback is unavailable in this browser.");
+        setVoiceState("idle");
+      }
     } catch (err) {
       if (!browserSpeak(text)) {
         setError(err.message);
@@ -142,7 +337,19 @@ export default function ChatPage() {
     try {
       const response = await api.chat({ message: userText, language, session_id: sessionId });
       setSessionId(response.session_id);
-      setMessages((items) => [...items, { role: "assistant", content: response.response, intent: response.intent }]);
+      setMessages((items) => {
+        const nextMessages = [...items, { role: "assistant", content: response.response, intent: response.intent }];
+        if (response.intent === "grievance") {
+          nextMessages.push({
+            role: "assistant",
+            content: "Do you want to create an official grievance report from this chat?",
+            intent: "grievance",
+            action: "create_grievance",
+            draft: userText,
+          });
+        }
+        return nextMessages;
+      });
       if (speakResponse) {
         await playResponse(response.response);
       }
@@ -165,24 +372,50 @@ export default function ChatPage() {
     setVoiceState("transcribing");
     setError("");
     try {
-      const transcribeData = new FormData();
-      transcribeData.append("audio", blob, "voice.webm");
-      transcribeData.append("language", voiceLanguages[language] || "en-IN");
-      const transcription = await api.transcribeVoice(transcribeData);
-      const formattedTranscript = transcription.transcript;
-      setMessages((items) => [...items, { role: "user", content: formattedTranscript }]);
+      const conversationData = new FormData();
+      conversationData.append("audio", blob, "voice.webm");
+      conversationData.append("language", language);
+      conversationData.append("fast_response", "true");
+      if (sessionId) conversationData.append("session_id", sessionId);
 
       setVoiceState("thinking");
-      const respondData = new FormData();
-      respondData.append("text", formattedTranscript);
-      respondData.append("language", language);
-      if (sessionId) respondData.append("session_id", sessionId);
-      const answer = await api.voiceRespond(respondData);
+      const answer = await api.voiceConversation(conversationData);
+      const formattedTranscript = (answer.transcript || "").trim();
+      if (!formattedTranscript) {
+        const fallbackText = answer.response || "I could not hear that clearly. Please try again.";
+        if (!liveModeRef.current) setError(fallbackText);
+        const spoke = browserSpeak(fallbackText);
+        if (!spoke) {
+          setVoiceState("idle");
+        }
+        if (liveModeRef.current && !spoke) {
+          window.setTimeout(() => startVoice().catch((err) => setError(err.message)), 250);
+        }
+        return;
+      }
+      setMessages((items) => [...items, { role: "user", content: formattedTranscript }]);
+
       setSessionId(answer.session_id);
-      setMessages((items) => [...items, { role: "assistant", content: answer.response, intent: answer.intent }]);
+      setMessages((items) => {
+        const nextMessages = [...items, { role: "assistant", content: answer.response, intent: answer.intent }];
+        if (answer.intent === "grievance") {
+          nextMessages.push({
+            role: "assistant",
+            content: "Do you want to create an official grievance report from this voice query?",
+            intent: "grievance",
+            action: "create_grievance",
+            draft: formattedTranscript,
+          });
+        }
+        return nextMessages;
+      });
 
       if (answer.audio_base64) {
-        await playBlob(base64ToBlob(answer.audio_base64, answer.audio_mime_type || "audio/wav"));
+        const played = await playBlob(base64ToBlob(answer.audio_base64, answer.audio_mime_type || "audio/wav"));
+        if (!played && !browserSpeak(answer.response)) {
+          setError("Voice response was generated, but audio playback is unavailable.");
+          setVoiceState("idle");
+        }
       } else if (!browserSpeak(answer.response)) {
         setError("Voice response was generated, but audio playback is unavailable.");
         setVoiceState("idle");
@@ -190,6 +423,9 @@ export default function ChatPage() {
     } catch (err) {
       setError(err.message);
       setVoiceState("idle");
+      if (liveModeRef.current) {
+        window.setTimeout(() => startVoice().catch((error) => setError(error.message)), 700);
+      }
     }
   }
 
@@ -205,6 +441,10 @@ export default function ChatPage() {
     const mimeType = getRecorderMimeType();
     const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
     chunksRef.current = [];
+    speechStartedRef.current = false;
+    silenceStartedAtRef.current = null;
+    recordingStartedAtRef.current = Date.now();
+    cancelRecordingRef.current = false;
     streamRef.current = stream;
     recorderRef.current = recorder;
 
@@ -212,21 +452,41 @@ export default function ChatPage() {
       if (event.data.size > 0) chunksRef.current.push(event.data);
     };
     recorder.onstop = () => {
+      cleanupVoiceDetection();
       const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
       stream.getTracks().forEach((track) => track.stop());
-      if (blob.size < 1000) {
-        setError("Recording was too short. Hold the mic and speak for a moment.");
+      if (cancelRecordingRef.current) {
+        cancelRecordingRef.current = false;
         setVoiceState("idle");
+        return;
+      }
+      if (!speechStartedRef.current) {
+        setVoiceState("idle");
+        if (liveModeRef.current) {
+          window.setTimeout(() => startVoice().catch((err) => setError(err.message)), 250);
+        }
+        return;
+      }
+      if (blob.size < 1000) {
+        setVoiceState("idle");
+        if (liveModeRef.current) {
+          window.setTimeout(() => startVoice().catch((err) => setError(err.message)), 250);
+        } else {
+          setError("Recording was too short. Speak for a moment and pause.");
+        }
         return;
       }
       sendVoiceConversation(blob);
     };
 
-    recorder.start();
+    recorder.start(150);
+    startVoiceDetection(stream, recorder);
     setVoiceState("listening");
   }
 
-  function stopVoice() {
+  function stopVoice(cancel = false) {
+    cancelRecordingRef.current = cancel;
+    cleanupVoiceDetection();
     if (recorderRef.current?.state === "recording") {
       recorderRef.current.stop();
     }
@@ -252,7 +512,7 @@ export default function ChatPage() {
   async function toggleLiveConversation() {
     if (liveMode) {
       setLiveEnabled(false);
-      stopVoice();
+      stopVoice(true);
       audioRef.current?.pause();
       window.speechSynthesis?.cancel();
       setVoiceState("idle");
@@ -311,7 +571,12 @@ export default function ChatPage() {
           {messages.map((item, index) => (
             <div className={`chat-bubble ${item.role}`} key={`${item.role}-${index}`}>
               <span>{item.role === "user" ? "You" : "KrishiMitra"}</span>
-              <p>{item.content}</p>
+              {renderMessageContent(item.content)}
+              {item.action === "create_grievance" && (
+                <button className="secondary-button bubble-action" type="button" onClick={() => openGrievanceForm(item.draft)}>
+                  Create grievance report
+                </button>
+              )}
               {item.role === "assistant" && (
                 <button className="speak-inline" type="button" onClick={() => playResponse(item.content)} aria-label="Play response">
                   <Volume2 size={15} />
@@ -328,6 +593,47 @@ export default function ChatPage() {
           )}
         </div>
 
+        {grievanceOpen && (
+          <section className="grievance-composer" aria-label="Create grievance report">
+            <div className="grievance-composer-header">
+              <div>
+                <strong>Create grievance report</strong>
+                <span>This creates a real case with a tracking ID.</span>
+              </div>
+              <button className="icon-button" type="button" onClick={() => setGrievanceOpen(false)} aria-label="Close grievance form">
+                <X size={17} />
+              </button>
+            </div>
+            <form className="grievance-form" onSubmit={submitGrievance}>
+              <label>
+                Category
+                <select value={grievanceForm.category} onChange={(event) => setGrievanceForm({ ...grievanceForm, category: event.target.value })}>
+                  {grievanceCategories.map((category) => <option key={category}>{category}</option>)}
+                </select>
+              </label>
+              <label>
+                District
+                <input value={grievanceForm.district} onChange={(event) => setGrievanceForm({ ...grievanceForm, district: event.target.value })} placeholder="Optional" />
+              </label>
+              <label className="full-row">
+                Title
+                <input required value={grievanceForm.title} onChange={(event) => setGrievanceForm({ ...grievanceForm, title: event.target.value })} placeholder="Short issue title" />
+              </label>
+              <label className="full-row">
+                Description
+                <textarea required rows="4" value={grievanceForm.description} onChange={(event) => setGrievanceForm({ ...grievanceForm, description: event.target.value })} placeholder="Explain what happened, application ID, date, amount, officer/office, and documents if available." />
+              </label>
+              <div className="grievance-actions full-row">
+                <button className="secondary-button" type="button" onClick={() => setGrievanceOpen(false)}>Cancel</button>
+                <button className="primary-button" disabled={grievanceLoading || !grievanceForm.title.trim() || !grievanceForm.description.trim()}>
+                  {grievanceLoading ? <Loader2 className="spin-icon" size={16} /> : <ClipboardList size={16} />}
+                  Submit report
+                </button>
+              </div>
+            </form>
+          </section>
+        )}
+
         <form className="chat-input unified query-only" onSubmit={sendMessage}>
           <div className="add-menu-wrap">
             <button className="icon-button" type="button" onClick={() => setAddOpen((open) => !open)} aria-label="Add query type">
@@ -335,12 +641,15 @@ export default function ChatPage() {
             </button>
             {addOpen && (
               <div className="add-menu">
-                {addOptions.map(({ label, prompt, icon: Icon }) => (
-                  <button type="button" onClick={() => choosePrompt(prompt)} key={label}>
+                {addOptions.map((option) => {
+                  const Icon = option.icon;
+                  return (
+                  <button type="button" onClick={() => chooseAddOption(option)} key={option.label}>
                     <Icon size={16} />
-                    <span>{label}</span>
+                    <span>{option.label}</span>
                   </button>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

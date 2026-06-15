@@ -20,6 +20,8 @@ router = APIRouter(prefix="/chat", tags=["Chat"])
 SUPPORTED_SCHEMES = [
     "PM-KISAN",
     "Krushak Yojana",
+    "Raitha Sakthi Yojana",
+    "Mukhyamantri Samathuvapuram",
     "PM Fasal Bima Yojana",
     "Kisan Credit Card",
     "National Agriculture Market (eNAM)",
@@ -64,6 +66,8 @@ def detect_scheme_name(message: str) -> str:
     lowered = message.lower()
     aliases = {
         "PM-KISAN": ["pm-kisan", "pm kisan", "kisan samman", "samman nidhi"],
+        "Mukhyamantri Samathuvapuram": ["samathuvapuram", "samathuva puram", "samathuva puram", "mukhyamantri samathuvapuram"],
+        "Raitha Sakthi Yojana": ["raitha sakthi", "raita sakthi", "raitha shakti", "raita shakti", "raitha sakti"],
         "PM Fasal Bima Yojana": ["fasal bima", "pmfby", "crop insurance", "insurance"],
         "Kisan Credit Card": ["kisan credit", "kcc", "credit card", "crop loan"],
         "Soil Health Card Scheme": ["soil health", "soil card"],
@@ -147,7 +151,7 @@ def format_scheme_result(result: dict, language: str = "en") -> str:
     alternatives = ", ".join(result.get("alternative_schemes") or [])
     if base_language == "en":
         parts = [
-            f"{result.get('scheme_name')} looks like: {heading}.",
+            f"Eligibility for {result.get('scheme_name')}: {heading}.",
             result.get("eligibility_reason", ""),
             f"You may get: {result.get('benefits', '-')}",
             f"Keep these documents ready: {documents or '-'}",

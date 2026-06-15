@@ -63,6 +63,23 @@ def _language_instruction(language: str) -> str:
     )
 
 
+SCHEME_EVALUATION_GUIDE = """Use these scheme criteria when the scheme matches:
+- PM-KISAN:
+  - Eligible path: landholding farmer family with recorded agricultural land.
+  - Not eligible path: tenant/sharecropper/landless without recorded land in the family name.
+  - Verification checks: exclusion categories (income-tax payer, government service/pension, constitutional post, professional status, institutional landholding) and e-KYC.
+- Mukhyamantri Samathuvapuram:
+  - Primary scope: Tamil Nadu state implementation.
+  - Not eligible path: state outside Tamil Nadu.
+  - Verification checks: residence in eligible local body, income/economic-category cut-off under current state order, one-household-one-allotment and document match.
+- Raitha Sakthi Yojana:
+  - Primary scope: Karnataka state implementation.
+  - Not eligible path: state outside Karnataka.
+  - Typical eligible path: resident cultivator/farmer household under the targeted category (small/marginal/eligible tenant categories per state rule).
+  - Verification checks: updated farmer registration, land/cultivation linkage, category and exclusion rules under current state circulars.
+When facts clearly violate mandatory criteria, return not_eligible with a direct reason. Otherwise return requires_verification with missing checks."""
+
+
 def _basic_sentence_format(text: str, language: str = "en") -> str:
     cleaned = re.sub(r"\s+", " ", (text or "").strip())
     if not cleaned:
@@ -346,6 +363,8 @@ Land ownership: {land_ownership}
 Farmer category: {farmer_category}
 Annual income: {annual_income}
 
+{SCHEME_EVALUATION_GUIDE}
+
 Return only valid JSON with these keys:
 is_eligible (true, false, or null when verification is required),
 eligibility_status ("eligible", "not_eligible", or "requires_verification"),
@@ -365,6 +384,8 @@ All text values must be in {_language_name(language)}."""
                     "content": (
                         "You are a senior Indian agricultural scheme eligibility analyst. "
                         "Use cautious, official-process-oriented reasoning and return strict JSON only. "
+                        "Do not guess unknown rules; use requires_verification when official checks are missing. "
+                        f"{SCHEME_EVALUATION_GUIDE}\n"
                         f"{_language_instruction(language)}"
                     ),
                 },
@@ -404,6 +425,7 @@ def _eligibility_result(
     documents: List[str],
     steps: str,
     alternatives: Optional[List[str]] = None,
+    verification_notes: Optional[str] = None,
 ) -> Dict[str, Any]:
     return {
         "is_eligible": status,
@@ -413,6 +435,7 @@ def _eligibility_result(
         "required_documents": documents,
         "alternative_schemes": alternatives or ["Kisan Credit Card", "PM Fasal Bima Yojana", "Soil Health Card Scheme"],
         "application_steps": steps,
+        "verification_notes": verification_notes,
         "scheme_name": scheme_name,
     }
 
@@ -447,6 +470,7 @@ def _rule_based_scheme_check(
                 "Income support of Rs 6,000 per year in three instalments to eligible landholding farmer families.",
                 ["Aadhaar", "Land ownership record", "Bank account", "Mobile number", "e-KYC"],
                 "Complete e-KYC and verify beneficiary status through PM-KISAN or the local agriculture office.",
+                verification_notes="Check PM-KISAN exclusion categories before final approval.",
             )
         return _eligibility_result(
             "PM-KISAN",
@@ -455,6 +479,74 @@ def _rule_based_scheme_check(
             "Income support of Rs 6,000 per year in three instalments to eligible landholding farmer families.",
             ["Aadhaar", "Land ownership record", "Bank account", "Mobile number", "e-KYC"],
             "Collect land record and exclusion details, then verify on the PM-KISAN portal.",
+        )
+
+    if "samathuvapuram" in scheme or "samathuva puram" in scheme:
+        if state_value and state_value not in {"tamil nadu", "tamilnadu", "tn"}:
+            return _eligibility_result(
+                "Mukhyamantri Samathuvapuram",
+                False,
+                "Mukhyamantri Samathuvapuram is a Tamil Nadu state scheme. With the given non-Tamil Nadu state, this application is not eligible for this scheme.",
+                "State-supported housing/allotment benefits for eligible Tamil Nadu households under the current order.",
+                ["Residence proof", "Family/income certificate", "Identity proof", "Ration/family card", "Scheme application form"],
+                "Check equivalent housing/welfare schemes in your own state through the district administration office.",
+                alternatives=["PM-KISAN", "Kisan Credit Card", "Pradhan Mantri Krishi Sinchayee Yojana"],
+            )
+
+        if annual_income is not None and annual_income > 300000:
+            return _eligibility_result(
+                "Mukhyamantri Samathuvapuram",
+                False,
+                "Based on the provided annual income, the household appears above the typical low-income targeting range used for this scheme category.",
+                "State-supported housing/allotment benefits for eligible Tamil Nadu households under the current order.",
+                ["Residence proof", "Family/income certificate", "Identity proof", "Ration/family card", "Scheme application form"],
+                "Verify latest income limits with the Tamil Nadu district office before applying.",
+                alternatives=["PM-KISAN", "Kisan Credit Card", "PM Fasal Bima Yojana"],
+            )
+
+        return _eligibility_result(
+            "Mukhyamantri Samathuvapuram",
+            None,
+            "The details may fit a Tamil Nadu applicant, but final eligibility requires confirmation of district/residence, current income cut-off, and one-household-one-allotment conditions.",
+            "State-supported housing/allotment benefits for eligible Tamil Nadu households under the current order.",
+            ["Residence proof", "Family/income certificate", "Identity proof", "Ration/family card", "Scheme application form"],
+            "Verify current Samathuvapuram eligibility conditions at the local tahsildar/revenue office before submission.",
+            verification_notes="Confirm current district list, income slab, and prior-allotment status.",
+            alternatives=["PM-KISAN", "Kisan Credit Card", "PM Fasal Bima Yojana"],
+        )
+
+    if "raitha sakthi" in scheme or "raita sakthi" in scheme or "raitha shakti" in scheme or "raita shakti" in scheme:
+        if state_value and state_value not in {"karnataka", "ka"}:
+            return _eligibility_result(
+                "Raitha Sakthi Yojana",
+                False,
+                "Raitha Sakthi Yojana is treated as Karnataka-specific support. With the entered state outside Karnataka, this application is not eligible under this scheme.",
+                "State farmer-support assistance for eligible Karnataka cultivator households under current rules.",
+                ["Farmer registration ID", "Aadhaar", "Bank account", "Land/cultivation document", "Residence proof"],
+                "Check your own state's farmer support schemes through the agriculture department.",
+                alternatives=["PM-KISAN", "Kisan Credit Card", "PM Fasal Bima Yojana"],
+            )
+
+        if category in {"large", "commercial"}:
+            return _eligibility_result(
+                "Raitha Sakthi Yojana",
+                False,
+                "Large/commercial farmer category may fall outside the usual small/marginal targeted beneficiary group for this scheme.",
+                "State farmer-support assistance for eligible Karnataka cultivator households under current rules.",
+                ["Farmer registration ID", "Aadhaar", "Bank account", "Land/cultivation document", "Residence proof"],
+                "Confirm latest beneficiary category rules in the Karnataka farmer portal/agriculture office.",
+                alternatives=["PM-KISAN", "Kisan Credit Card", "PM Fasal Bima Yojana"],
+            )
+
+        return _eligibility_result(
+            "Raitha Sakthi Yojana",
+            None,
+            "The details suggest possible eligibility, but final decision requires Karnataka farmer registration, cultivation linkage, and category/exclusion verification under the latest state circular.",
+            "State farmer-support assistance for eligible Karnataka cultivator households under current rules.",
+            ["Farmer registration ID", "Aadhaar", "Bank account", "Land/cultivation document", "Residence proof"],
+            "Verify current Raitha Sakthi eligibility and apply through the Karnataka agriculture service portal or local office.",
+            verification_notes="Confirm current portal enrollment and beneficiary-category rules.",
+            alternatives=["PM-KISAN", "Kisan Credit Card", "PM Fasal Bima Yojana"],
         )
 
     if "fasal bima" in scheme or "pmfby" in scheme or "crop insurance" in scheme:
@@ -673,9 +765,12 @@ def _mock_scheme_check(scheme_name: str, annual_income: float, language: str) ->
 
     return {
         "is_eligible": is_eligible,
+        "eligibility_status": "eligible" if is_eligible else "not_eligible",
         "eligibility_reason": reason,
         "benefits": "Benefits depend on the scheme rules and state implementation.",
         "required_documents": ["Aadhaar Card", "Land Records", "Bank Account Details", "Mobile Number"],
         "alternative_schemes": ["PM Fasal Bima Yojana", "Kisan Credit Card", "Soil Health Card Scheme"],
         "application_steps": "Visit the nearest CSC/agriculture office or official scheme portal with documents.",
+        "verification_notes": "Check state-specific exclusions and latest official circular before final submission.",
+        "scheme_name": scheme_name,
     }

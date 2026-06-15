@@ -10,16 +10,19 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@pipecat-ai/client-js": "^1.11.0",
+    "@pipecat-ai/small-webrtc-transport": "^1.10.4",
     "@vitejs/plugin-react": "latest",
-    "vite": "latest",
+    "lodash": "^4.18.1",
+    "lucide-react": "latest",
     "react": "latest",
     "react-dom": "latest",
     "react-router-dom": "latest",
-    "lucide-react": "latest"
+    "vite": "latest"
   },
   "devDependencies": {
-    "eslint": "latest",
     "@eslint/js": "latest",
+    "eslint": "latest",
     "eslint-plugin-react-hooks": "latest",
     "eslint-plugin-react-refresh": "latest",
     "globals": "latest"

@@ -94,7 +94,6 @@ export const api = {
 
   transcribeVoice: (formData) => request("/voice/transcribe", { method: "POST", body: formData }),
   speak: (data) => request("/voice/speak", { method: "POST", body: data }),
-  voiceConversation: (formData) => request("/voice/conversation", { method: "POST", body: formData }),
   voiceRespond: (formData) => request("/voice/respond", { method: "POST", body: formData }),
   voiceLiveSession: (formData) => request("/voice/live/session", { method: "POST", body: formData }),
 

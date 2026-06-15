@@ -4,7 +4,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import Base, engine
-from app.routers import admin, auth, chat, disease, grievance, ivr, officer, scheme, voice
+from app.routers import admin, auth, chat, disease, grievance, ivr, live_voice, officer, scheme, voice
 from app.services.ai.sarvam_ai_service import diagnose_sarvam
 
 
@@ -33,6 +33,7 @@ app.include_router(disease.router)
 app.include_router(grievance.router)
 app.include_router(scheme.router)
 app.include_router(voice.router)
+app.include_router(live_voice.router)
 app.include_router(ivr.router)
 app.include_router(ivr.router, prefix="/client")
 app.include_router(officer.router)
@@ -56,8 +57,8 @@ async def health_check():
         "ivr_default_language": settings.IVR_DEFAULT_LANGUAGE,
         "ivr_enabled_languages": settings.ivr_enabled_languages_list,
         "ivr_twilio_use_sarvam_audio": settings.IVR_TWILIO_USE_SARVAM_AUDIO,
-        "voice_live_provider": "pipecat" if settings.PIPECAT_BOT_URL else settings.VOICE_LIVE_FALLBACK,
-        "pipecat_configured": bool(settings.PIPECAT_BOT_URL),
+        "voice_live_provider": "pipecat-smallwebrtc",
+        "voice_live_route": "/voice/live/session",
         "voice_ai_formatting": settings.VOICE_ENABLE_AI_FORMATTING,
     }
 

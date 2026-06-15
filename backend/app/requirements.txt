@@ -6,6 +6,7 @@ pydantic
 pydantic-settings
 python-jose[cryptography]
 passlib[bcrypt]
+pipecat-ai[sarvam,silero,webrtc]>=0.0.105
 python-multipart
 httpx
 aiofiles

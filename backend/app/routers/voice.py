@@ -8,7 +8,6 @@ from app.models import User, Conversation
 from app.schemas import VoiceTranscribeOut, VoiceSpeakRequest
 from app.auth import get_current_user
 from app.routers.chat import detect_scheme_name, format_scheme_result
-from app.config import settings
 from app.services.ai.sarvam_ai_service import (
     chat_with_ai,
     check_scheme_eligibility,
@@ -284,31 +283,4 @@ async def voice_text_response(
         "audio_base64": audio_base64,
         "audio_mime_type": "audio/wav" if audio_base64 else None,
         "tts_available": bool(audio_base64),
-    }
-
-
-@router.post("/live/session")
-async def live_voice_session(
-    language: str = Form("en"),
-    session_id: str | None = Form(None),
-    current_user: User = Depends(get_current_user),
-):
-    """Bootstrap browser live voice. Uses Pipecat when configured, otherwise Sarvam turn loop."""
-    resolved_session_id = session_id or str(uuid.uuid4())
-    pipecat_url = settings.PIPECAT_BOT_URL.strip()
-    provider = "pipecat" if pipecat_url else settings.VOICE_LIVE_FALLBACK
-    return {
-        "session_id": resolved_session_id,
-        "provider": provider,
-        "pipecat_url": pipecat_url or None,
-        "fallback": settings.VOICE_LIVE_FALLBACK,
-        "language": _chat_language(language),
-        "audio_language": _audio_language(language),
-        "sarvam": {
-            "stt_model": settings.SARVAM_STT_MODEL,
-            "llm_model": settings.SARVAM_CHAT_MODEL,
-            "tts_model": settings.SARVAM_TTS_MODEL,
-            "voice_id": settings.SARVAM_TTS_SPEAKER,
-        },
-        "instructions": "Use Pipecat client transport when pipecat_url is present; otherwise use /voice/conversation in live turn loop.",
     }

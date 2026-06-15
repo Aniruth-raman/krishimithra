@@ -268,7 +268,7 @@ th { background: #f1f7ee; color: #304a32; font-size: 0.85rem; text-transform: up
 }
 
 .chat-input.query-only {
-  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
 }
 
@@ -372,25 +372,88 @@ th { background: #f1f7ee; color: #304a32; font-size: 0.85rem; text-transform: up
   opacity: 0.82;
 }
 
-.live-button {
-  min-height: 44px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 0 14px;
-  background: #f8faf6;
-  color: var(--green-dark);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  cursor: pointer;
-  font-weight: 900;
+.live-mode-panel {
+  grid-template-rows: auto auto auto 1fr auto;
 }
 
-.live-button.active {
+.live-mode-stage {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  padding: 34px 20px 24px;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, #fbfcfa, #f4faf2);
+}
+
+.live-mode-stage h3 {
+  margin: 4px 0 0;
+  font-size: 1.3rem;
+}
+
+.live-mode-stage p {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.live-orb {
+  width: 132px;
+  height: 132px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
   background: #111b13;
-  border-color: #111b13;
   color: white;
+  position: relative;
+}
+
+.live-orb::before,
+.live-orb::after {
+  content: "";
+  position: absolute;
+  inset: -10px;
+  border-radius: 50%;
+  border: 2px solid rgba(47, 125, 50, 0.24);
+  opacity: 0;
+}
+
+.live-orb.active::before,
+.live-orb.active::after {
+  animation: voicePulse 1.7s ease-out infinite;
+  opacity: 1;
+}
+
+.live-orb.active::after {
+  animation-delay: 0.55s;
+}
+
+.live-orb.muted {
+  background: var(--orange);
+}
+
+.live-mode-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.live-start-button.stop {
+  background: #111b13;
+}
+
+.mute-button.active {
+  background: #fff4df;
+  color: #8a4c00;
+}
+
+.live-transcript {
+  min-height: 260px;
+  border: 0;
+  border-radius: 0;
+  background: #ffffff;
 }
 
 .voice-status {

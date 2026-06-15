@@ -7,6 +7,7 @@ import { ProtectedRoute } from "./components/ProtectedRoute";
 import AdminPage from "./pages/AdminPage";
 import ChatPage from "./pages/ChatPage";
 import HomePage from "./pages/HomePage";
+import LiveModePage from "./pages/LiveModePage";
 import LoginPage from "./pages/LoginPage";
 import OfficerPage from "./pages/OfficerPage";
 import ProfilePage from "./pages/ProfilePage";
@@ -29,12 +30,13 @@ function AppRoutes() {
         <Route index element={<HomePage />} />
         <Route path="dashboard" element={<ProtectedRoute roles={["farmer"]}><HomePage /></ProtectedRoute>} />
         <Route path="assistant" element={<ProtectedRoute roles={["farmer"]}><ChatPage /></ProtectedRoute>} />
+        <Route path="live" element={<ProtectedRoute roles={["farmer"]}><LiveModePage /></ProtectedRoute>} />
         <Route path="profile" element={<ProtectedRoute roles={["farmer"]}><ProfilePage /></ProtectedRoute>} />
         <Route path="chat" element={<Navigate to="/assistant" replace />} />
         <Route path="disease" element={<Navigate to="/assistant" replace />} />
         <Route path="schemes" element={<Navigate to="/assistant" replace />} />
         <Route path="grievances" element={<Navigate to="/assistant" replace />} />
-        <Route path="voice" element={<Navigate to="/assistant" replace />} />
+        <Route path="voice" element={<Navigate to="/live" replace />} />
         <Route
           path="officer"
           element={

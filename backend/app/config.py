@@ -40,9 +40,9 @@ class Settings(BaseSettings):
     IVR_RESPONSE_MAX_CHARS: int = 650
     IVR_TWILIO_USE_SARVAM_AUDIO: bool = False
 
-    PIPECAT_BOT_URL: str = ""
-    VOICE_LIVE_FALLBACK: str = "sarvam_loop"
     VOICE_ENABLE_AI_FORMATTING: bool = True
+    VOICE_WEBRTC_ICE_SERVERS: str = "stun:stun.l.google.com:19302"
+    VOICE_LIVE_SAMPLE_RATE: int = 16000
 
     UPLOAD_DIR: str = "uploads"
     MAX_UPLOAD_SIZE: int = 10485760

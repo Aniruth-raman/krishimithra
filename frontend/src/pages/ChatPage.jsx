@@ -1,6 +1,6 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { ClipboardList, Landmark, Leaf, Loader2, Mic, Plus, Radio, Send, Sparkles, Square, Volume2, X } from "lucide-react";
+import { ClipboardList, Landmark, Leaf, Loader2, Mic, Plus, Send, Sparkles, Square, Volume2, X } from "lucide-react";
 import { api } from "../api/client";
 import { ErrorAlert } from "../components/Ui";
 import { useAuth } from "../context/AuthContext";
@@ -33,21 +33,16 @@ export default function ChatPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [voiceState, setVoiceState] = useState("idle");
-  const [liveMode, setLiveMode] = useState(false);
-  const [liveProvider, setLiveProvider] = useState("");
   const [error, setError] = useState("");
   const inputRef = useRef(null);
   const recorderRef = useRef(null);
   const streamRef = useRef(null);
   const chunksRef = useRef([]);
   const audioRef = useRef(null);
-  const liveModeRef = useRef(false);
 
-  function setLiveEnabled(enabled) {
-    liveModeRef.current = enabled;
-    setLiveMode(enabled);
-    if (!enabled) setLiveProvider("");
-  }
+  useEffect(() => () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+  }, []);
 
   function voiceStatusLabel() {
     const labels = {
@@ -56,8 +51,7 @@ export default function ChatPage() {
       thinking: "Starting AI response...",
       speaking: "Speaking response...",
     };
-    const providerLabel = liveMode && liveProvider ? ` Live: ${liveProvider}` : "";
-    return `${labels[voiceState] || ""}${providerLabel}`;
+    return labels[voiceState] || "";
   }
 
   function getRecorderMimeType() {
@@ -82,7 +76,6 @@ export default function ChatPage() {
     utterance.rate = 0.95;
     utterance.onend = () => {
       setVoiceState("idle");
-      if (liveModeRef.current) startVoice().catch((err) => setError(err.message));
     };
     utterance.onerror = () => setVoiceState("idle");
     window.speechSynthesis.speak(utterance);
@@ -100,7 +93,6 @@ export default function ChatPage() {
         audioRef.current.onended = () => {
           URL.revokeObjectURL(audioUrl);
           setVoiceState("idle");
-          if (liveModeRef.current) startVoice().catch((err) => setError(err.message));
         };
         await audioRef.current.play();
       }
@@ -239,45 +231,12 @@ export default function ChatPage() {
       return;
     }
     if (voiceState === "idle") {
-      setLiveEnabled(false);
       audioRef.current?.pause();
       window.speechSynthesis?.cancel();
       startVoice().catch((err) => {
         setError(err.message);
         setVoiceState("idle");
       });
-    }
-  }
-
-  async function toggleLiveConversation() {
-    if (liveMode) {
-      setLiveEnabled(false);
-      stopVoice();
-      audioRef.current?.pause();
-      window.speechSynthesis?.cancel();
-      setVoiceState("idle");
-      return;
-    }
-
-    setError("");
-    try {
-      const formData = new FormData();
-      formData.append("language", language);
-      if (sessionId) formData.append("session_id", sessionId);
-      const session = await api.voiceLiveSession(formData);
-      setSessionId(session.session_id);
-      setLiveProvider(session.provider === "pipecat" ? "Pipecat + Sarvam" : "Sarvam live loop");
-      setLiveEnabled(true);
-      if (session.provider === "pipecat" && session.pipecat_url) {
-        setError("Pipecat bot URL is configured. Browser Pipecat transport package is not installed, so this page is using Sarvam live loop fallback.");
-      }
-      if (voiceState === "idle") {
-        await startVoice();
-      }
-    } catch (err) {
-      setError(err.message);
-      setLiveEnabled(false);
-      setVoiceState("idle");
     }
   }
 
@@ -353,17 +312,13 @@ export default function ChatPage() {
           <button className={`voice-orb ${voiceState}`} type="button" onClick={toggleVoice} disabled={!["idle", "listening"].includes(voiceState)} aria-label="Voice query">
             {voiceState === "listening" ? <Square size={18} /> : <Mic size={20} />}
           </button>
-          <button className={`live-button ${liveMode ? "active" : ""}`} type="button" onClick={toggleLiveConversation}>
-            {liveMode ? <Square size={16} /> : <Radio size={16} />}
-            {liveMode ? "Stop" : "Live"}
-          </button>
           <button className="primary-button send-button" disabled={loading || !message.trim()}>
             {loading ? <Loader2 className="spin-icon" size={16} /> : <Send size={16} />}
             Send
           </button>
         </form>
         <div className="voice-status" aria-live="polite">{voiceStatusLabel()}</div>
-        <audio ref={audioRef} className="sr-only" />
+        <audio ref={audioRef} className="sr-only" autoPlay playsInline />
       </section>
     </div>
   );

@@ -1,10 +1,11 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { BarChart3, Bot, Home, LogOut, Shield, UserCog } from "lucide-react";
+import { BarChart3, Bot, Home, LogOut, Radio, Shield, UserCog } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 
 const farmerLinks = [
   { to: "/", label: "Dashboard", icon: Home },
   { to: "/assistant", label: "AI Assistant", icon: Bot },
+  { to: "/live", label: "Live Mode", icon: Radio },
   { to: "/profile", label: "Profile", icon: UserCog },
 ];
 

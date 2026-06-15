@@ -88,6 +88,9 @@ export const api = {
 
   analyzeDisease: (formData) => request("/disease/analyze", { method: "POST", body: formData }),
   diseaseReports: () => request("/disease/reports"),
+  diseaseHotspots: (days = 30) => request(`/disease/hotspots?days=${encodeURIComponent(days)}`),
+  weather: (location) => request(`/weather/current?location=${encodeURIComponent(location)}`),
+  myWeather: () => request("/weather/me"),
   officerDiseaseReports: () => request("/officer/disease-reports"),
   officerDashboard: () => request("/officer/dashboard"),
   ivrSessions: () => request("/ivr/sessions"),

@@ -3,12 +3,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.database import Base, engine
-from app.routers import admin, auth, chat, disease, grievance, ivr, officer, scheme, voice
+from app.database import Base, engine, ensure_sqlite_schema_compatibility
+from app.routers import admin, auth, chat, disease, grievance, ivr, officer, scheme, voice, weather
 from app.services.ai.sarvam_ai_service import diagnose_sarvam
 
 
 Base.metadata.create_all(bind=engine)
+ensure_sqlite_schema_compatibility()
 
 app = FastAPI(
     title="KrishiMitra API",
@@ -33,6 +34,7 @@ app.include_router(disease.router)
 app.include_router(grievance.router)
 app.include_router(scheme.router)
 app.include_router(voice.router)
+app.include_router(weather.router)
 app.include_router(ivr.router)
 app.include_router(ivr.router, prefix="/api")
 app.include_router(ivr.router, prefix="/client")

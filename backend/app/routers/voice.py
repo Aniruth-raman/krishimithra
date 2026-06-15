@@ -105,7 +105,7 @@ def _empty_voice_response(language: str, session_id: str) -> dict:
     }
     return {
         "transcript": "",
-        "response": messages.get(chat_language, messages["en"]),
+        "response": "I missed that. Please say it once more, close to the microphone.",
         "intent": "voice",
         "session_id": session_id,
         "language": chat_language,

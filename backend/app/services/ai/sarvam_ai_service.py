@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from app.config import settings
+from app.services.weather_service import fetch_weather
 
 
 SARVAM_BASE_URL = "https://api.sarvam.ai"
@@ -558,13 +559,31 @@ async def get_weather_advisory(
     query: str,
     language: str = "ta",
 ) -> str:
-    weather = {
-        "temperature": 31,
-        "humidity": 72,
-        "rainfall_mm": 4,
-        "wind_speed_kmh": 12,
-        "forecast_3days": "Light rain is possible in the next 2 days.",
-    }
+    try:
+        weather_data = await fetch_weather(district)
+        current_weather = weather_data["current"]
+        weather = {
+            "temperature": current_weather.get("temperature_c"),
+            "humidity": current_weather.get("humidity_percent"),
+            "rainfall_mm": current_weather.get("rainfall_mm"),
+            "wind_speed_kmh": current_weather.get("wind_speed_kmh"),
+            "forecast_3days": weather_data.get("forecast_3days"),
+            "spray_window": weather_data.get("spray_window"),
+            "irrigation": weather_data.get("irrigation"),
+        }
+        live_note = "These values are from the Open-Meteo weather API."
+    except Exception as error:
+        print(f"Weather API lookup failed: {error}")
+        weather = {
+            "temperature": 31,
+            "humidity": 72,
+            "rainfall_mm": 4,
+            "wind_speed_kmh": 12,
+            "forecast_3days": "Light rain is possible in the next 2 days.",
+            "spray_window": {"decision": "delay_spraying", "reason": "Fallback data indicates rain risk."},
+            "irrigation": {"decision": "monitor_soil", "reason": "Fallback data is not enough for an irrigation decision."},
+        }
+        live_note = "Live weather lookup failed, so this uses safe fallback values."
 
     try:
         prompt = f"""Prepare a weather-risk advisory for the farmer.
@@ -573,12 +592,15 @@ District: {district}
 Crop: {crop_type}
 Current weather: Temperature {weather['temperature']}°C, humidity {weather['humidity']}%, rainfall {weather['rainfall_mm']} mm, wind {weather['wind_speed_kmh']} km/h.
 3-day forecast: {weather['forecast_3days']}
+Spray window signal: {json.dumps(weather['spray_window'], ensure_ascii=False)}
+Irrigation signal: {json.dumps(weather['irrigation'], ensure_ascii=False)}
+Data note: {live_note}
 
 Give a concise but technically strong advisory:
 - State the decision first, especially whether to irrigate, spray, delay spraying, drain water, or monitor.
 - Explain the weather risk in farmer-friendly terms.
 - Include safe spray guidance when relevant: rain gap, wind caution, protective equipment, and label verification.
-- Do not claim this is live weather; use only the weather values provided above.
+- Do not invent weather data; use only the weather values provided above.
 {_language_instruction(language)}"""
         content = await _sarvam_chat(
             messages=[

@@ -5,10 +5,10 @@ import { ErrorAlert } from "../components/Ui";
 import { useAuth } from "../context/AuthContext";
 
 const languages = [
-  { value: "ta", label: "Tamil", hint: "தமிழில் பேசுங்கள்" },
-  { value: "kn", label: "Kannada", hint: "ಕನ್ನಡದಲ್ಲಿ ಮಾತನಾಡಿ" },
-  { value: "hi", label: "Hindi", hint: "हिंदी में बोलें" },
-  { value: "en", label: "English", hint: "Speak naturally" },
+  { value: "ta", label: "Tamil", hint: "Tamil voice mode" },
+  { value: "kn", label: "Kannada", hint: "Kannada voice mode" },
+  { value: "hi", label: "Hindi", hint: "Hindi voice mode" },
+  { value: "en", label: "English", hint: "English voice mode" },
 ];
 
 const speechLanguages = {
@@ -19,20 +19,12 @@ const speechLanguages = {
 };
 
 const statusCopy = {
-  idle: "Ready",
-  connecting: "Starting voice session",
-  listening: "Listening now",
-  thinking: "Understanding and preparing reply",
-  speaking: "Speaking back",
+  idle: "Tap the mic to start",
+  connecting: "Opening the microphone",
+  listening: "Listening",
+  thinking: "Thinking",
+  speaking: "Speaking",
 };
-
-const demoPrompts = [
-  "My paddy leaves are yellow. What should I do?",
-  "Which subsidy scheme can I apply for?",
-  "Create a grievance for delayed subsidy payment.",
-  "Track grievance GRV202679449.",
-  "Give weather advice for my crop this week.",
-];
 
 export default function LiveVoicePage() {
   const { user } = useAuth();
@@ -42,12 +34,14 @@ export default function LiveVoicePage() {
   const [fastMode, setFastMode] = useState(true);
   const [sessionId, setSessionId] = useState("");
   const [provider, setProvider] = useState("");
+  const [inputMode, setInputMode] = useState("");
   const [turns, setTurns] = useState([]);
   const [lastTranscript, setLastTranscript] = useState("");
   const [lastResponse, setLastResponse] = useState("");
   const [error, setError] = useState("");
 
   const recorderRef = useRef(null);
+  const recognitionRef = useRef(null);
   const streamRef = useRef(null);
   const chunksRef = useRef([]);
   const audioRef = useRef(null);
@@ -84,6 +78,10 @@ export default function LiveVoicePage() {
     return options.find((type) => MediaRecorder.isTypeSupported?.(type)) || "";
   }
 
+  function getSpeechRecognition() {
+    return window.SpeechRecognition || window.webkitSpeechRecognition;
+  }
+
   function base64ToBlob(base64, mimeType = "audio/wav") {
     const binary = window.atob(base64);
     const bytes = new Uint8Array(binary.length);
@@ -98,6 +96,7 @@ export default function LiveVoicePage() {
       .replace(/\*\*(.*?)\*\*/g, "$1")
       .replace(/\[(.*?)\]\((.*?)\)/g, "$1 ($2)")
       .replace(/#{1,6}\s*/g, "")
+      .replace(/\s+\n/g, "\n")
       .trim();
   }
 
@@ -119,6 +118,8 @@ export default function LiveVoicePage() {
 
   function stopRecording(cancel = false) {
     cancelRecordingRef.current = cancel;
+    recognitionRef.current?.abort();
+    recognitionRef.current = null;
     cleanupVoiceDetection();
     if (recorderRef.current?.state === "recording") {
       recorderRef.current.stop();
@@ -141,6 +142,87 @@ export default function LiveVoicePage() {
         });
       }
     }, delayMs);
+  }
+
+  async function startSession() {
+    const formData = new FormData();
+    formData.append("language", languageRef.current);
+    if (sessionIdRef.current) formData.append("session_id", sessionIdRef.current);
+    const session = await api.voiceLiveSession(formData);
+    sessionIdRef.current = session.session_id;
+    setSessionId(session.session_id);
+    setProvider(session.provider === "pipecat" ? "Pipecat configured" : "Sarvam browser loop");
+  }
+
+  async function startListening() {
+    const SpeechRecognition = getSpeechRecognition();
+    if (SpeechRecognition) {
+      startSpeechRecognition(SpeechRecognition);
+      return;
+    }
+    await startAudioListening();
+  }
+
+  function startSpeechRecognition(SpeechRecognition) {
+    stopPlayback();
+    setError("");
+    setInputMode("speech");
+    cancelRecordingRef.current = false;
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = speechLanguages[languageRef.current] || "en-IN";
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognitionRef.current = recognition;
+
+    let sent = false;
+
+    recognition.onresult = (event) => {
+      const transcript = Array.from(event.results || [])
+        .map((result) => result?.[0]?.transcript || "")
+        .join(" ")
+        .trim();
+      if (!transcript) return;
+      sent = true;
+      recognition.stop();
+      sendTextTurn(transcript);
+    };
+
+    recognition.onerror = (event) => {
+      if (cancelRecordingRef.current) return;
+      if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+        activeRef.current = false;
+        setLiveMode(false);
+        setStatus("idle");
+        setError("Microphone permission is blocked. Allow microphone access and start again.");
+        return;
+      }
+      if (event.error !== "no-speech") {
+        setError("Speech recognition paused. Switching to audio capture.");
+        recognitionRef.current = null;
+        startAudioListening().catch((err) => {
+          setError(err.message);
+          setStatus("idle");
+        });
+      }
+    };
+
+    recognition.onend = () => {
+      recognitionRef.current = null;
+      if (cancelRecordingRef.current) {
+        cancelRecordingRef.current = false;
+        setStatus("idle");
+        return;
+      }
+      if (!sent && activeRef.current) {
+        setStatus("idle");
+        scheduleNextListen(260);
+      }
+    };
+
+    recognition.start();
+    setStatus("listening");
   }
 
   function startVoiceDetection(stream, recorder) {
@@ -200,23 +282,14 @@ export default function LiveVoicePage() {
     vadFrameRef.current = window.requestAnimationFrame(checkVoice);
   }
 
-  async function startSession() {
-    const formData = new FormData();
-    formData.append("language", languageRef.current);
-    if (sessionIdRef.current) formData.append("session_id", sessionIdRef.current);
-    const session = await api.voiceLiveSession(formData);
-    sessionIdRef.current = session.session_id;
-    setSessionId(session.session_id);
-    setProvider(session.provider === "pipecat" ? "Pipecat configured, using Sarvam browser loop" : "Sarvam browser loop");
-  }
-
-  async function startListening() {
+  async function startAudioListening() {
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
       throw new Error("Voice recording is not supported in this browser.");
     }
 
     stopPlayback();
     setError("");
+    setInputMode("audio");
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
@@ -310,6 +383,16 @@ export default function LiveVoicePage() {
     }
   }
 
+  function pushTurn(transcript, response, intent) {
+    setLastTranscript(transcript);
+    setLastResponse(response);
+    setTurns((items) => [
+      { role: "user", content: transcript },
+      { role: "assistant", content: response, intent },
+      ...items,
+    ].slice(0, 10));
+  }
+
   async function sendVoiceTurn(blob) {
     setStatus("thinking");
     setError("");
@@ -327,17 +410,31 @@ export default function LiveVoicePage() {
 
       const transcript = cleanText(answer.transcript);
       const response = cleanText(answer.response);
-      setLastTranscript(transcript);
-      setLastResponse(response);
+      if (transcript) pushTurn(transcript, response, answer.intent);
+      await speakAnswer({ ...answer, response });
+    } catch (err) {
+      setError(err.message);
+      scheduleNextListen(800);
+    }
+  }
 
-      if (transcript) {
-        setTurns((items) => [
-          { role: "user", content: transcript },
-          { role: "assistant", content: response, intent: answer.intent },
-          ...items,
-        ].slice(0, 10));
-      }
+  async function sendTextTurn(prompt) {
+    setStatus("thinking");
+    setError("");
 
+    try {
+      const formData = new FormData();
+      formData.append("text", prompt);
+      formData.append("language", languageRef.current);
+      formData.append("fast_response", fastModeRef.current ? "true" : "false");
+      if (sessionIdRef.current) formData.append("session_id", sessionIdRef.current);
+      const answer = await api.voiceRespond(formData);
+      sessionIdRef.current = answer.session_id;
+      setSessionId(answer.session_id);
+
+      const transcript = cleanText(answer.transcript || prompt);
+      const response = cleanText(answer.response);
+      pushTurn(transcript, response, answer.intent);
       await speakAnswer({ ...answer, response });
     } catch (err) {
       setError(err.message);
@@ -378,32 +475,9 @@ export default function LiveVoicePage() {
     await startLive();
   }
 
-  async function sendDemoPrompt(prompt) {
-    setStatus("thinking");
-    setError("");
+  async function testSpokenReply() {
     stopRecording(true);
-    try {
-      const formData = new FormData();
-      formData.append("text", prompt);
-      formData.append("language", language);
-      formData.append("fast_response", fastMode ? "true" : "false");
-      if (sessionIdRef.current) formData.append("session_id", sessionIdRef.current);
-      const answer = await api.voiceRespond(formData);
-      sessionIdRef.current = answer.session_id;
-      setSessionId(answer.session_id);
-      const response = cleanText(answer.response);
-      setLastTranscript(prompt);
-      setLastResponse(response);
-      setTurns((items) => [
-        { role: "user", content: prompt },
-        { role: "assistant", content: response, intent: answer.intent },
-        ...items,
-      ].slice(0, 10));
-      await speakAnswer({ ...answer, response });
-    } catch (err) {
-      setError(err.message);
-      setStatus("idle");
-    }
+    await sendTextTurn("Give a short crop advisory for today's field work.");
   }
 
   const selectedLanguage = languages.find((item) => item.value === language) || languages.at(-1);
@@ -412,15 +486,15 @@ export default function LiveVoicePage() {
     <div className="live-voice-page">
       <section className="live-voice-hero panel">
         <div>
-          <span className="eyebrow">Gemini-style voice demo</span>
-          <h2>KrishiMitra Live Voice</h2>
-          <p>Speak naturally. The app detects your pause, sends the audio to Sarvam STT and KrishiMitra AI, then speaks the reply back automatically.</p>
+          <span className="eyebrow">Live voice</span>
+          <h2>Talk to KrishiMitra</h2>
+          <p>Ask about crop disease, schemes, weather, or grievances. KrishiMitra listens, answers aloud, and keeps the conversation moving.</p>
         </div>
         <div className="live-provider-card">
           <Radio size={19} />
           <div>
             <strong>{provider || "Sarvam browser loop"}</strong>
-            <span>{sessionId ? `Session ${sessionId.slice(0, 8)}` : "New voice session"}</span>
+            <span>{inputMode ? `${inputMode === "speech" ? "Browser speech" : "Audio upload"} mode` : sessionId ? `Session ${sessionId.slice(0, 8)}` : "Ready"}</span>
           </div>
         </div>
       </section>
@@ -453,8 +527,8 @@ export default function LiveVoicePage() {
 
           <div className="live-state-copy" aria-live="polite">
             <span>{statusCopy[status]}</span>
-            <strong>{liveMode ? selectedLanguage.hint : "Press start and ask one farming question"}</strong>
-            <p>{liveMode ? "Pause for one second when you finish. I will answer and resume listening." : "Works for disease, schemes, weather, grievance creation, and grievance tracking."}</p>
+            <strong>{liveMode ? selectedLanguage.hint : "Start a hands-free conversation"}</strong>
+            <p>{liveMode ? "Speak one thought, pause, and the next turn begins after the reply." : "The fastest path uses browser speech recognition, with audio upload as fallback."}</p>
           </div>
 
           <div className="live-control-row">
@@ -462,7 +536,7 @@ export default function LiveVoicePage() {
               {liveMode ? <Square size={17} /> : <Headphones size={17} />}
               {liveMode ? "Stop live voice" : "Start live voice"}
             </button>
-            <button className="secondary-button" type="button" onClick={() => sendDemoPrompt(demoPrompts[0])} disabled={status === "listening" || status === "thinking"}>
+            <button className="secondary-button" type="button" onClick={testSpokenReply} disabled={status === "listening" || status === "thinking"}>
               <Volume2 size={17} />
               Test spoken reply
             </button>
@@ -479,15 +553,6 @@ export default function LiveVoicePage() {
             <span>KrishiMitra replied</span>
             <p>{lastResponse || "The spoken answer will appear here."}</p>
           </article>
-
-          <div className="live-demo-prompts">
-            <strong>Quick demo prompts</strong>
-            {demoPrompts.map((prompt) => (
-              <button type="button" key={prompt} onClick={() => sendDemoPrompt(prompt)} disabled={status === "listening" || status === "thinking"}>
-                {prompt}
-              </button>
-            ))}
-          </div>
         </aside>
       </section>
 
@@ -496,13 +561,13 @@ export default function LiveVoicePage() {
         {turns.length === 0 ? (
           <div className="empty-state">
             <h3>No turns yet</h3>
-            <p>Start live voice, speak, pause, and KrishiMitra will reply aloud.</p>
+            <p>Your spoken turns will appear here after the first reply.</p>
           </div>
         ) : (
           <div className="live-turn-list">
             {turns.map((turn, index) => (
               <article className={`live-turn ${turn.role}`} key={`${turn.role}-${index}-${turn.content.slice(0, 20)}`}>
-                <span>{turn.role === "user" ? "Farmer" : `KrishiMitra${turn.intent ? ` · ${turn.intent}` : ""}`}</span>
+                <span>{turn.role === "user" ? "Farmer" : `KrishiMitra${turn.intent ? ` - ${turn.intent}` : ""}`}</span>
                 <p>{turn.content}</p>
               </article>
             ))}

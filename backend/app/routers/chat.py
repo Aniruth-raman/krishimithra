@@ -67,7 +67,7 @@ def detect_scheme_name(message: str) -> str:
     aliases = {
         "PM-KISAN": ["pm-kisan", "pm kisan", "kisan samman", "samman nidhi"],
         "Mukhyamantri Samathuvapuram": ["samathuvapuram", "samathuva puram", "mukhyamantri samathuvapuram"],
-        "Raitha Sakthi Yojana": ["raitha sakthi", "raita sakthi", "raitha shakti", "raita shakti", "raitha sakti"],
+        "Raitha Sakthi Yojana": ["raitha sakthi", "raita sakthi", "raitha shakti", "raita shakti"],
         "PM Fasal Bima Yojana": ["fasal bima", "pmfby", "crop insurance", "insurance"],
         "Kisan Credit Card": ["kisan credit", "kcc", "credit card", "crop loan"],
         "Soil Health Card Scheme": ["soil health", "soil card"],

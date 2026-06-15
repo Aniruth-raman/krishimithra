@@ -483,12 +483,12 @@ def _rule_based_scheme_check(
             "Collect land record and exclusion details, then verify on the PM-KISAN portal.",
         )
 
-    if "samathuvapuram" in scheme or "samathuva puram" in scheme:
+    if any(variant in scheme for variant in ("samathuvapuram", "samathuva puram")):
         if state_value and state_value not in {"tamil nadu", "tamilnadu", "tn"}:
             return _eligibility_result(
                 "Mukhyamantri Samathuvapuram",
                 False,
-                "Mukhyamantri Samathuvapuram is a Tamil Nadu state scheme. With the given non-Tamil Nadu state, this application is not eligible for this scheme.",
+                "Mukhyamantri Samathuvapuram is a Tamil Nadu state scheme. Since the applicant is from a state outside Tamil Nadu, this application is not eligible for this scheme.",
                 "State-supported housing/allotment benefits for eligible Tamil Nadu households under the current order.",
                 ["Residence proof", "Family/income certificate", "Identity proof", "Ration/family card", "Scheme application form"],
                 "Check equivalent housing/welfare schemes in your own state through the district administration office.",
@@ -517,12 +517,12 @@ def _rule_based_scheme_check(
             alternatives=["PM-KISAN", "Kisan Credit Card", "PM Fasal Bima Yojana"],
         )
 
-    if "raitha sakthi" in scheme or "raita sakthi" in scheme or "raitha shakti" in scheme or "raita shakti" in scheme:
+    if any(variant in scheme for variant in ("raitha sakthi", "raita sakthi", "raitha shakti", "raita shakti")):
         if state_value and state_value not in {"karnataka", "ka"}:
             return _eligibility_result(
                 "Raitha Sakthi Yojana",
                 False,
-                "Raitha Sakthi Yojana is treated as Karnataka-specific support. With the entered state outside Karnataka, this application is not eligible under this scheme.",
+                "Raitha Sakthi Yojana is treated as Karnataka-specific support. Since the applicant is from a state outside Karnataka, this application is not eligible under this scheme.",
                 "State farmer-support assistance for eligible Karnataka cultivator households under current rules.",
                 ["Farmer registration ID", "Aadhaar", "Bank account", "Land/cultivation document", "Residence proof"],
                 "Check your own state's farmer support schemes through the agriculture department.",

@@ -66,7 +66,7 @@ def detect_scheme_name(message: str) -> str:
     lowered = message.lower()
     aliases = {
         "PM-KISAN": ["pm-kisan", "pm kisan", "kisan samman", "samman nidhi"],
-        "Mukhyamantri Samathuvapuram": ["samathuvapuram", "samathuva puram", "samathuva puram", "mukhyamantri samathuvapuram"],
+        "Mukhyamantri Samathuvapuram": ["samathuvapuram", "samathuva puram", "mukhyamantri samathuvapuram"],
         "Raitha Sakthi Yojana": ["raitha sakthi", "raita sakthi", "raitha shakti", "raita shakti", "raitha sakti"],
         "PM Fasal Bima Yojana": ["fasal bima", "pmfby", "crop insurance", "insurance"],
         "Kisan Credit Card": ["kisan credit", "kcc", "credit card", "crop loan"],

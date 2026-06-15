@@ -22,6 +22,8 @@ LANGUAGE_NAMES = {
     "kn-IN": "Kannada",
 }
 
+SAMATHUVAPURAM_INCOME_LIMIT = 300000
+
 SYSTEM_PROMPT_FARMER = """You are KrishiMitra AI, an enterprise-grade agricultural decision-support assistant for Indian farmers, FPOs, and field extension teams.
 
 Core mandate:
@@ -493,7 +495,7 @@ def _rule_based_scheme_check(
                 alternatives=["PM-KISAN", "Kisan Credit Card", "Pradhan Mantri Krishi Sinchayee Yojana"],
             )
 
-        if annual_income is not None and annual_income > 300000:
+        if annual_income is not None and annual_income > SAMATHUVAPURAM_INCOME_LIMIT:
             return _eligibility_result(
                 "Mukhyamantri Samathuvapuram",
                 False,

@@ -36,6 +36,19 @@ def _format_forecast(daily: Dict[str, Any]) -> str:
     return "; ".join(parts) or "Forecast unavailable."
 
 
+def _condition_summary(current: Dict[str, Any], daily: Dict[str, Any]) -> str:
+    rainfall = float(current.get("precipitation") or current.get("rain") or 0)
+    temperature = current.get("temperature_2m")
+    rain_probability = _first(daily.get("precipitation_probability_max"), 0) or 0
+    if rainfall > 0:
+        return "Rain is occurring now."
+    if rain_probability >= 60:
+        return "Rain risk is high today."
+    if temperature is not None and float(temperature) >= 35:
+        return "Hot conditions may stress crops."
+    return "Weather is generally suitable for normal field work."
+
+
 def _spray_window(current: Dict[str, Any], daily: Dict[str, Any]) -> Dict[str, Any]:
     rainfall = float(current.get("precipitation") or current.get("rain") or 0)
     wind_speed = float(current.get("wind_speed_10m") or 0)
@@ -77,6 +90,26 @@ def _irrigation_advice(current: Dict[str, Any], daily: Dict[str, Any]) -> Dict[s
         reason = "No strong irrigation trigger from weather alone; check soil moisture and crop stage."
 
     return {"decision": decision, "reason": reason, "forecast_rain_3d_mm": round(rain_sum, 1)}
+
+
+def _farmer_weather_report(location: str, current: Dict[str, Any], daily: Dict[str, Any]) -> str:
+    temperature = current.get("temperature_2m")
+    humidity = current.get("relative_humidity_2m")
+    rainfall = current.get("precipitation") or current.get("rain") or 0
+    wind_speed = current.get("wind_speed_10m")
+    spray = _spray_window(current, daily)
+    irrigation = _irrigation_advice(current, daily)
+
+    return (
+        f"Weather in {location}\n\n"
+        f"Condition: {_condition_summary(current, daily)}\n"
+        f"Temperature: {temperature}°C\n"
+        f"Humidity: {humidity}%\n"
+        f"Rainfall now: {rainfall} mm\n"
+        f"Wind: {wind_speed} km/h\n\n"
+        f"Spray advice: {spray['decision'].replace('_', ' ')} - {spray['reason']}\n"
+        f"Irrigation advice: {irrigation['decision'].replace('_', ' ')} - {irrigation['reason']}"
+    )
 
 
 async def fetch_weather(location: str) -> Dict[str, Any]:
@@ -128,9 +161,11 @@ async def fetch_weather(location: str) -> Dict[str, Any]:
             "rainfall_mm": current.get("precipitation") or current.get("rain") or 0,
             "wind_speed_kmh": current.get("wind_speed_10m"),
             "time": current.get("time"),
+            "condition_summary": _condition_summary(current, daily),
         },
         "daily": daily,
         "forecast_3days": _format_forecast(daily),
         "spray_window": _spray_window(current, daily),
         "irrigation": _irrigation_advice(current, daily),
+        "farmer_report": _farmer_weather_report(resolved_name or location, current, daily),
     }

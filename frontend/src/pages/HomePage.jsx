@@ -1,11 +1,11 @@
 import { Link, Navigate } from "react-router-dom";
-import { Bot, ClipboardList, Landmark, Leaf, UserRound } from "lucide-react";
+import { Bot, ClipboardList, CloudSun, Landmark, Leaf, UserRound } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 
 const quickPrompts = [
-  { text: "My crop leaves have spots. What should I do?", icon: Leaf },
+  { text: "My crop leaves have spots. What should I check first?", icon: Leaf },
   { text: "Am I eligible for PM-KISAN?", icon: Landmark },
   { text: "How do I raise a subsidy grievance?", icon: ClipboardList },
 ];
@@ -17,9 +17,7 @@ export default function HomePage() {
   const [weatherError, setWeatherError] = useState("");
 
   useEffect(() => {
-    if (user?.role !== "farmer") {
-      return undefined;
-    }
+    if (user?.role !== "farmer") return undefined;
     let active = true;
     api.myWeather()
       .then((data) => {
@@ -38,21 +36,16 @@ export default function HomePage() {
     };
   }, [user?.role]);
 
-  if (user?.role === "officer") {
-    return <Navigate to="/officer" replace />;
-  }
-
-  if (user?.role === "admin") {
-    return <Navigate to="/admin" replace />;
-  }
+  if (user?.role === "officer") return <Navigate to="/officer" replace />;
+  if (user?.role === "admin") return <Navigate to="/admin" replace />;
 
   return (
-    <div className="page">
+    <div className="page next-dashboard">
       <header className="page-header dashboard-header">
         <div>
-          <span className="eyebrow">Namaste, {user?.full_name}</span>
-          <h2>Farmer Dashboard</h2>
-          <p>Ask one assistant about crop disease, schemes, weather, and grievances.</p>
+          <span className="eyebrow">Personal AI workspace</span>
+          <h2>Good to see you, {user?.full_name}</h2>
+          <p>Monitor field context, weather risk, disease activity, and the next best farming actions from one calm workspace.</p>
         </div>
       </header>
 
@@ -61,7 +54,7 @@ export default function HomePage() {
           <Bot size={22} />
           <div>
             <strong>Open AI Assistant</strong>
-            <span>One chat for diagnosis, schemes, grievance help, and crop advice.</span>
+            <span>Ask, compare, cite, draft, and act from one conversation.</span>
           </div>
         </Link>
         <Link className="secondary-action" to="/disease">
@@ -75,32 +68,34 @@ export default function HomePage() {
           <UserRound size={20} />
           <div>
             <strong>Farmer Profile</strong>
-            <span>Update crop, district, land, and language details.</span>
+            <span>Keep crop, district, land, and language context current.</span>
           </div>
         </Link>
       </section>
 
-      <section className="two-column">
-        <div className="panel">
-          <h3>Weather Advisory</h3>
+      <section className="two-column intelligence-grid">
+        <div className="panel live-card">
+          <h3><CloudSun size={18} /> Weather Intelligence</h3>
           {weather ? (
             <div className="result-list">
               <strong>{weather.resolved_location}</strong>
-              <span>{weather.current?.temperature_c ?? "-"}°C · Humidity {weather.current?.humidity_percent ?? "-"}%</span>
-              <span>Rain {weather.current?.rainfall_mm ?? 0} mm · Wind {weather.current?.wind_speed_kmh ?? "-"} km/h</span>
-              <p><b>Spray:</b> {weather.spray_window?.decision?.replaceAll("_", " ")} — {weather.spray_window?.reason}</p>
-              <p><b>Irrigation:</b> {weather.irrigation?.decision?.replaceAll("_", " ")} — {weather.irrigation?.reason}</p>
+              <span>{weather.current?.temperature_c ?? "-"} C - Humidity {weather.current?.humidity_percent ?? "-"}%</span>
+              <span>Rain {weather.current?.rainfall_mm ?? 0} mm - Wind {weather.current?.wind_speed_kmh ?? "-"} km/h</span>
+              <p><b>Spray:</b> {weather.spray_window?.decision?.replaceAll("_", " ")} - {weather.spray_window?.reason}</p>
+              <p><b>Irrigation:</b> {weather.irrigation?.decision?.replaceAll("_", " ")} - {weather.irrigation?.reason}</p>
             </div>
           ) : (
             <p>{weatherError || "Loading weather from your profile district..."}</p>
           )}
         </div>
-        <div className="panel">
-          <h3>Disease Hotspots</h3>
+        <div className="panel live-card">
+          <h3><Leaf size={18} /> Disease Hotspots</h3>
           {hotspots.length ? (
             <div className="result-list">
               {hotspots.slice(0, 4).map((item) => (
-                <span key={`${item.district}-${item.issue}-${item.severity}`}>{item.district}: {item.issue} · {item.case_count} cases · {item.severity}</span>
+                <span key={`${item.district}-${item.issue}-${item.severity}`}>
+                  {item.district}: {item.issue} - {item.case_count} cases - {item.severity}
+                </span>
               ))}
             </div>
           ) : (
@@ -110,7 +105,7 @@ export default function HomePage() {
       </section>
 
       <section className="panel quick-panel">
-        <h3>Common Queries</h3>
+        <h3>Suggested Next Moves</h3>
         <div className="quick-query-grid">
           {quickPrompts.map(({ text, icon: Icon }) => (
             <Link className="quick-query" to="/assistant" state={{ prompt: text }} key={text}>

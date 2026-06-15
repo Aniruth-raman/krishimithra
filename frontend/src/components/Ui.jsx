@@ -17,6 +17,15 @@ export function SuccessAlert({ message }) {
   return <div className="alert success">{message}</div>;
 }
 
+export function LoadingState({ message = "Loading..." }) {
+  return (
+    <div className="loading-state">
+      <div className="spinner" />
+      <span>{message}</span>
+    </div>
+  );
+}
+
 export function StatCard({ label, value, tone = "green" }) {
   return (
     <div className={`stat-card ${tone}`}>

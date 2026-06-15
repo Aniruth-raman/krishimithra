@@ -28,9 +28,14 @@ class Settings(BaseSettings):
     SARVAM_TTS_MODEL: str = "bulbul:v3"
     SARVAM_TTS_SPEAKER: str = "shubh"
 
+    GEMINI_API_KEY: str = ""
+    GEMINI_VISION_MODEL: str = "gemini-2.5-flash"
+    INDIAN_CITIES_PATH: str = ""
+
     TWILIO_ACCOUNT_SID: str = ""
     TWILIO_AUTH_TOKEN: str = ""
     TWILIO_FROM_NUMBER: str = ""
+    TWILIO_WHATSAPP_FROM: str = ""
     PUBLIC_BASE_URL: str = "http://127.0.0.1:8000"
     PUBLIC_WEBHOOK_PREFIX: str = ""
 

@@ -1,28 +1,46 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { BarChart3, Bot, Home, Leaf, LogOut, Mic, PhoneCall, Shield, UserCog } from "lucide-react";
+import { BarChart3, Bot, FileText, Home, Leaf, LogOut, Mic, PhoneCall, Shield, UserCog, Users } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import { useTheme } from "../context/ThemeContext";
 
 const farmerLinks = [
-  { to: "/", label: "Dashboard", icon: Home },
   { to: "/assistant", label: "AI Assistant", icon: Bot },
-  { to: "/disease", label: "Disease Scan", icon: Leaf },
-  { to: "/voice-live", label: "Live Voice", icon: Mic },
-  { to: "/profile", label: "Profile", icon: UserCog },
+  { to: "/voice-live", label: "Voice Assistant", icon: Mic },
 ];
 
+const farmerDesktopLinks = farmerLinks;
+
 const officerLinks = [
-  { to: "/officer", label: "Officer Dashboard", icon: BarChart3 },
+  { to: "/officer", label: "Dashboard", icon: Home },
+  { to: "/officer/grievances", label: "Grievances", icon: Shield },
+  { to: "/officer/diseases", label: "Disease Reports", icon: Leaf },
+  { to: "/officer/analytics", label: "Analytics", icon: BarChart3 },
 ];
 
 const adminLinks = [
-  { to: "/admin", label: "Admin Console", icon: Shield },
-  { to: "/admin/ivr-simulator", label: "IVR Simulator", icon: PhoneCall },
+  { to: "/admin", label: "Dashboard", icon: Home },
+  { to: "/admin/users", label: "Users", icon: Users },
+  { to: "/admin/schemes", label: "Schemes", icon: FileText },
+  { to: "/admin/analytics", label: "Analytics", icon: BarChart3 },
+  { to: "/admin/ivr-simulator", label: "IVR", icon: PhoneCall },
+  { to: "/admin/settings", label: "Settings", icon: UserCog },
 ];
+
+function NavItems({ links }) {
+  return links.map(({ to, label, icon: Icon }) => (
+    <NavLink key={to} to={to} end={to === "/"} className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}>
+      <Icon size={20} />
+      <span>{label}</span>
+    </NavLink>
+  ));
+}
 
 export default function Layout() {
   const { user, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
-  const links = user?.role === "admin" ? adminLinks : user?.role === "officer" ? officerLinks : farmerLinks;
+  const desktopLinks = user?.role === "admin" ? adminLinks : user?.role === "officer" ? officerLinks : farmerDesktopLinks;
+  const bottomLinks = user?.role === "farmer" ? farmerLinks : desktopLinks.slice(0, 5);
 
   function handleLogout() {
     logout();
@@ -30,26 +48,24 @@ export default function Layout() {
   }
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
+    <div className="app-shell farmer-companion-shell">
+      <aside className="sidebar simple-sidebar">
         <div className="brand">
           <div className="brand-mark">KM</div>
           <div>
             <h1>KrishiMitra</h1>
-            <p>Farmer assistant</p>
+            <p>AI farming companion</p>
           </div>
         </div>
 
-        <nav className="nav-list">
-          {links.map(({ to, label, icon: Icon }) => (
-            <NavLink key={to} to={to} end={to === "/"} className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}>
-              <Icon size={18} />
-              <span>{label}</span>
-            </NavLink>
-          ))}
+        <nav className="nav-list desktop-nav">
+          <NavItems links={desktopLinks} />
         </nav>
 
         <div className="sidebar-footer">
+          <button className="theme-toggle" type="button" onClick={toggleTheme}>
+            {theme === "dark" ? "Light mode" : "Dark mode"}
+          </button>
           <div className="user-card">
             <UserCog size={18} />
             <div>
@@ -66,6 +82,10 @@ export default function Layout() {
       <main className="content">
         <Outlet />
       </main>
+
+      <nav className="bottom-nav" aria-label="Primary navigation">
+        <NavItems links={bottomLinks} />
+      </nav>
     </div>
   );
 }

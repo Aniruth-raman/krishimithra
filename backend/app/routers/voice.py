@@ -22,6 +22,7 @@ from app.services.ai.sarvam_ai_service import (
     get_weather_advisory,
 )
 from app.services.ai.sarvam_service import transcribe_audio, text_to_speech
+from app.services.location_extractor import extract_location
 
 router = APIRouter(prefix="/voice", tags=["Voice"])
 
@@ -58,6 +59,7 @@ def _farmer_context(user: User) -> dict:
         return {}
     return {
         "district": profile.district,
+        "village": profile.village,
         "primary_crop": profile.primary_crop,
         "land_size": profile.land_size_acres,
         "state": profile.state,
@@ -103,6 +105,25 @@ def _empty_voice_response(language: str, session_id: str) -> dict:
         "hi": "आपकी आवाज साफ सुनाई नहीं दी। कृपया माइक्रोफोन के पास फिर से बोलें।",
         "en": "I could not hear that clearly. Please speak again closer to the microphone.",
     }
+
+
+def _resolve_weather_location(message: str, context: dict) -> str | None:
+    return (
+        extract_location(message)
+        or context.get("district")
+        or context.get("village")
+        or context.get("state")
+    )
+
+
+def _missing_location_message(language: str) -> str:
+    messages = {
+        "ta": "வானிலை அறிவுரைக்கு உங்கள் மாவட்டம் அல்லது நகரம் சொல்லுங்கள்.",
+        "hi": "मौसम सलाह के लिए अपना जिला या शहर बताइए।",
+        "kn": "ಹವಾಮಾನ ಸಲಹೆಗೆ ನಿಮ್ಮ ಜಿಲ್ಲೆ ಅಥವಾ ನಗರ ಹೇಳಿ.",
+        "en": "Tell me your district or city for weather advice.",
+    }
+    return messages.get((language or "en").split("-")[0], messages["en"])
     return {
         "transcript": "",
         "response": "I missed that. Please say it once more, close to the microphone.",
@@ -160,10 +181,31 @@ async def _assistant_response(
     intent = await classify_intent(message, fast=voice_mode)
     context = _farmer_context(current_user)
 
-    if intent == "weather" and context.get("district"):
+    if intent == "weather":
+        location = _resolve_weather_location(message, context)
+        if not location:
+            response_text = _missing_location_message(language)
+            db.add(Conversation(
+                user_id=current_user.id,
+                session_id=session_id,
+                role="user",
+                content=message,
+                intent=intent,
+                language=language,
+            ))
+            db.add(Conversation(
+                user_id=current_user.id,
+                session_id=session_id,
+                role="assistant",
+                content=response_text,
+                intent=intent,
+                language=language,
+            ))
+            db.commit()
+            return response_text, intent
         response_text = await get_weather_advisory(
             crop_type=context.get("primary_crop") or "crop",
-            district=context.get("district") or "your district",
+            district=location,
             query=message,
             language=language,
         )

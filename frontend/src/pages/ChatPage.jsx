@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { ClipboardList, Landmark, Leaf, Loader2, Mic, Plus, Send, Sparkles, Square, Volume2, X } from "lucide-react";
+import { Camera, ClipboardList, CloudSun, Landmark, Leaf, Loader2, Mic, Paperclip, Plus, ScanLine, Send, Sparkles, Square, Volume2, X } from "lucide-react";
 import { api } from "../api/client";
 import { ErrorAlert } from "../components/Ui";
 import { useAuth } from "../context/AuthContext";
@@ -22,9 +22,17 @@ const voiceLanguages = {
 const grievanceCategories = ["Subsidy Delay", "Crop Loss", "Insurance", "Irrigation", "Market Rate Issue"];
 
 const addOptions = [
-  { label: "Crop disease", prompt: "My crop has yellow leaves and spots. What should I check first?", icon: Leaf, type: "prompt" },
-  { label: "Scheme query", prompt: "Check which government schemes I may be eligible for.", icon: Landmark, type: "prompt" },
+  { label: "Crop disease help", prompt: "My crop has yellow leaves and spots. What should I check first?", icon: Leaf, type: "prompt" },
+  { label: "Weather advice", prompt: "Should I spray pesticide today? Please consider rain, wind, and crop safety.", icon: CloudSun, type: "prompt" },
+  { label: "Scheme eligibility", prompt: "Check which government schemes I may be eligible for based on my farm details.", icon: Landmark, type: "prompt" },
   { label: "Create grievance", icon: ClipboardList, type: "grievance" },
+];
+
+const suggestedActions = [
+  "Why are my leaves yellow?",
+  "Should I spray pesticide today?",
+  "Which schemes am I eligible for?",
+  "Track my grievance",
 ];
 
 export default function ChatPage() {
@@ -486,8 +494,8 @@ export default function ChatPage() {
       <section className="assistant-main simple" aria-label="AI farming assistant">
         <header className="assistant-header">
           <div>
-            <span>KrishiMitra</span>
-            <h2>AI Assistant</h2>
+            <span>AI farming companion</span>
+            <h2>Ask KrishiMitra</h2>
           </div>
           <div className="assistant-controls">
             <label className="sr-only" htmlFor="chat-language">Response language</label>
@@ -500,11 +508,17 @@ export default function ChatPage() {
         <ErrorAlert error={error} />
 
         <div className="chat-window unified simple">
+          <div className="date-separator"><span>Today</span></div>
           {messages.length === 0 && (
             <div className="assistant-empty compact">
               <Sparkles size={22} />
-              <h3>Ask one farming question</h3>
-              <p>Crop disease, schemes, weather advice, and grievance help all start here.</p>
+              <h3>What do you need in the field?</h3>
+              <p>Ask about crop disease, weather decisions, schemes, or grievances from this one assistant.</p>
+              <div className="suggestion-row">
+                {suggestedActions.map((action) => (
+                  <button type="button" key={action} onClick={() => choosePrompt(action)}>{action}</button>
+                ))}
+              </div>
             </div>
           )}
 
@@ -597,8 +611,11 @@ export default function ChatPage() {
             ref={inputRef}
             value={message}
             onChange={(event) => setMessage(event.target.value)}
-            placeholder="Query KrishiMitra AI"
+            placeholder="Ask about crops, weather, schemes, or grievances..."
           />
+          <button className="composer-tool" type="button" aria-label="Attach file"><Paperclip size={18} /></button>
+          <button className="composer-tool" type="button" aria-label="Upload image"><Camera size={18} /></button>
+          <button className="composer-tool" type="button" aria-label="Screen capture"><ScanLine size={18} /></button>
           <button className={`voice-orb ${voiceState}`} type="button" onClick={toggleVoice} disabled={!["idle", "listening"].includes(voiceState)} aria-label="Voice query">
             {voiceState === "listening" ? <Square size={18} /> : <Mic size={20} />}
           </button>

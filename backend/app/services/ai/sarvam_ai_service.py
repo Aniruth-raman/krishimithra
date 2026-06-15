@@ -1,9 +1,9 @@
-﻿import base64
-import json
+﻿import json
 import re
 from typing import Any, Dict, List, Optional
 
 import httpx
+from PIL import Image
 
 from app.config import settings
 from app.services.weather_service import fetch_weather
@@ -175,26 +175,26 @@ def _friendly_sarvam_error(error: Exception, language: str) -> str:
     detail = str(error)
     if "SARVAM_API_KEY" in detail:
         messages = {
-            "ta": "Sarvam API key அமைக்கப்படவில்லை. backend/app/.env கோப்பில் SARVAM_API_KEY சேர்த்து backend ஐ restart செய்யவும்.",
-            "hi": "Sarvam API key सेट नहीं है। backend/app/.env में SARVAM_API_KEY जोड़कर backend restart करें।",
-            "kn": "Sarvam API key ಹೊಂದಿಸಲಾಗಿಲ್ಲ. backend/app/.env ನಲ್ಲಿ SARVAM_API_KEY ಸೇರಿಸಿ backend ಅನ್ನು restart ಮಾಡಿ.",
+            "ta": "Sarvam API key ????????????????. backend/app/.env ???????? SARVAM_API_KEY ???????? backend ? restart ?????????.",
+            "hi": "Sarvam API key ??? ???? ??? backend/app/.env ??? SARVAM_API_KEY ?????? backend restart ?????",
+            "kn": "Sarvam API key ?????????????. backend/app/.env ????? SARVAM_API_KEY ?????? backend ????? restart ????.",
             "en": "Sarvam API key is not configured. Add SARVAM_API_KEY in backend/app/.env and restart the backend.",
         }
         return messages.get(language, messages["en"])
 
     if "401" in detail or "403" in detail or "unauthorized" in detail.lower() or "forbidden" in detail.lower():
         messages = {
-            "ta": "Sarvam API key தவறாக உள்ளது அல்லது இந்த API க்கு அனுமதி இல்லை. key மற்றும் subscription ஐ சரிபார்த்து backend ஐ restart செய்யவும்.",
-            "hi": "Sarvam API key गलत है या इस API की अनुमति नहीं है। key/subscription जाँचें और backend restart करें।",
-            "kn": "Sarvam API key ತಪ್ಪಾಗಿದೆ ಅಥವಾ ಈ API ಗೆ ಅನುಮತಿ ಇಲ್ಲ. key/subscription ಪರಿಶೀಲಿಸಿ backend restart ಮಾಡಿ.",
+            "ta": "Sarvam API key ????? ?????? ?????? ???? API ???? ?????? ?????. key ??????? subscription ? ??????????? backend ? restart ?????????.",
+            "hi": "Sarvam API key ??? ?? ?? ?? API ?? ?????? ???? ??? key/subscription ?????? ?? backend restart ?????",
+            "kn": "Sarvam API key ????????? ???? ? API ?? ?????? ????. key/subscription ????????? backend restart ????.",
             "en": "Sarvam API key is invalid or not allowed for this API. Check the key/subscription and restart the backend.",
         }
         return messages.get(language, messages["en"])
 
     messages = {
-        "ta": "Sarvam AI request தோல்வியடைந்தது. Backend terminal இல் error details பார்க்கவும்.",
-        "hi": "Sarvam AI request failed. Backend terminal में error details देखें।",
-        "kn": "Sarvam AI request ವಿಫಲವಾಯಿತು. Backend terminal ನಲ್ಲಿ error details ನೋಡಿ.",
+        "ta": "Sarvam AI request ??????????????. Backend terminal ??? error details ???????????.",
+        "hi": "Sarvam AI request failed. Backend terminal ??? error details ??????",
+        "kn": "Sarvam AI request ??????????. Backend terminal ????? error details ????.",
         "en": "Sarvam AI request failed. Check the backend terminal for details.",
     }
     return messages.get(language, messages["en"])
@@ -270,15 +270,15 @@ Return only one lowercase category word. No punctuation, explanation, or extra t
 
 def _fallback_intent(message: str) -> str:
     msg = message.lower()
-    if any(word in msg for word in ["disease", "pest", "leaf", "yellow", "rot", "fungus", "virus", "நோய்", "ರೋಗ", "बीमारी", "कीट"]):
+    if any(word in msg for word in ["disease", "pest", "leaf", "yellow", "rot", "fungus", "virus", "????", "???", "??????", "???"]):
         return "disease"
-    if any(word in msg for word in ["weather", "rain", "spray", "wind", "மழை", "ಮಳೆ", "बारिश", "मौसम"]):
+    if any(word in msg for word in ["weather", "rain", "spray", "wind", "???", "???", "?????", "????"]):
         return "weather"
-    if any(word in msg for word in ["scheme", "kisan", "subsidy", "yojana", "திட்டம்", "ಯೋಜನೆ", "योजना", "सब्सिडी"]):
+    if any(word in msg for word in ["scheme", "kisan", "subsidy", "yojana", "???????", "?????", "?????", "???????"]):
         return "scheme"
-    if any(word in msg for word in ["complaint", "grievance", "delay", "problem", "புகார்", "ದೂರು", "शिकायत"]):
+    if any(word in msg for word in ["complaint", "grievance", "delay", "problem", "??????", "????", "??????"]):
         return "grievance"
-    if any(word in msg for word in ["yield", "fertilizer", "water", "irrigation", "விளைச்சல்", "ಇಳುವರಿ", "उपज", "खाद"]):
+    if any(word in msg for word in ["yield", "fertilizer", "water", "irrigation", "?????????", "??????", "???", "???"]):
         return "yield"
     return "general"
 
@@ -317,13 +317,111 @@ Voice response contract:
         return _friendly_sarvam_error(error, language)
 
 
-async def analyze_crop_image(image_path: str, crop_type: Optional[str] = None) -> Dict[str, Any]:
+async def analyze_crop_image(image_path: str, crop_type: Optional[str] = None, language: str = "en") -> Dict[str, Any]:
+    image_metadata = _inspect_crop_image(image_path)
+    gemini_result = await _diagnose_with_gemini_vision(image_path, crop_type, image_metadata, language)
+    if gemini_result:
+        return gemini_result
+    return _crop_specific_image_analysis(crop_type, image_metadata)
+
+
+def _inspect_crop_image(image_path: str) -> Dict[str, Any]:
     try:
-        with open(image_path, "rb") as image_file:
-            base64.b64encode(image_file.read()).decode("utf-8")
+        with Image.open(image_path) as image:
+            return {
+                "format": image.format,
+                "width": image.width,
+                "height": image.height,
+                "mode": image.mode,
+            }
     except Exception as error:
         print(f"Image read failed: {error}")
-    return _mock_disease_analysis(crop_type)
+        return {"format": None, "width": None, "height": None, "mode": None}
+
+
+async def _diagnose_with_gemini_vision(
+    image_path: str,
+    crop_type: Optional[str],
+    image_metadata: Dict[str, Any],
+    language: str = "en",
+) -> Optional[Dict[str, Any]]:
+    if not settings.GEMINI_API_KEY:
+        return None
+
+    try:
+        import google.generativeai as genai
+    except Exception as error:
+        print(f"Gemini vision unavailable: {error}")
+        return None
+
+    try:
+        genai.configure(api_key=settings.GEMINI_API_KEY)
+        model = genai.GenerativeModel(settings.GEMINI_VISION_MODEL)
+        with Image.open(image_path) as image:
+            prompt = f"""You are KrishiMitra, an expert crop disease and pest triage assistant for Indian farmers.
+Analyze the uploaded crop image and return only valid JSON.
+
+Crop provided by user: {crop_type or "unknown"}
+Image metadata: {json.dumps(image_metadata, ensure_ascii=False)}
+Response language for all farmer-facing text values: {_language_name(language)}.
+
+JSON keys:
+is_crop_image: boolean
+disease_name: string or null
+pest_name: string or null
+severity: "low", "medium", "high", or "unknown"
+confidence_score: number between 0 and 1
+description: short farmer-friendly diagnosis. If this is not a crop/plant image, say that clearly.
+treatment: practical integrated pest/disease management steps. Avoid exact chemical dosage unless label context is clear. If this is not a crop image, ask for a clear crop image.
+preventive_measures: short prevention advice.
+
+Rules:
+- If the image is blurry, not a plant/crop, or does not show visible symptoms, set is_crop_image accordingly and keep confidence low.
+- Do not claim a disease with high confidence unless visible symptoms support it.
+- Prefer integrated pest management: inspection, sanitation, water management, traps/biological options, and local officer/KVK confirmation.
+- Do not add markdown, code fences, or extra text."""
+            response = model.generate_content([prompt, image])
+        parsed = _parse_disease_json(response.text)
+        if parsed:
+            parsed["analysis_source"] = "gemini_vision"
+            return parsed
+    except Exception as error:
+        print(f"Gemini vision diagnosis failed: {error}")
+    return None
+
+
+def _parse_disease_json(text: str) -> Optional[Dict[str, Any]]:
+    cleaned = (text or "").strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?", "", cleaned).strip()
+        cleaned = re.sub(r"```$", "", cleaned).strip()
+    try:
+        payload = json.loads(cleaned)
+    except Exception:
+        match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
+        if not match:
+            return None
+        try:
+            payload = json.loads(match.group(0))
+        except Exception:
+            return None
+
+    confidence = payload.get("confidence_score")
+    try:
+        confidence = max(0.0, min(1.0, float(confidence)))
+    except (TypeError, ValueError):
+        confidence = 0.7
+
+    return {
+        "is_crop_image": payload.get("is_crop_image", True),
+        "disease_name": payload.get("disease_name"),
+        "pest_name": payload.get("pest_name"),
+        "severity": payload.get("severity") or "unknown",
+        "confidence_score": confidence,
+        "description": payload.get("description") or "The image was analyzed, but the visible symptoms need field confirmation.",
+        "treatment": payload.get("treatment") or "Inspect affected plants closely, remove badly infected leaves, improve field sanitation, and confirm treatment with a local agriculture officer.",
+        "preventive_measures": payload.get("preventive_measures") or "Monitor the crop weekly, avoid overhead irrigation when disease risk is high, and keep good spacing for airflow.",
+    }
 
 
 async def check_scheme_eligibility(
@@ -639,23 +737,96 @@ async def classify_grievance(description: str) -> str:
 
 def _mock_weather_advisory(crop_type: str, district: str, weather: Dict[str, Any], language: str) -> str:
     if language == "ta":
-        return f"{district} பகுதியில் தற்போது {weather['temperature']}°C வெப்பநிலை மற்றும் {weather['humidity']}% ஈரப்பதம் உள்ளது. {crop_type} பயிரில் மழை வாய்ப்பு உள்ளதால் பூச்சிக்கொல்லி தெளிப்பதை தவிர்க்கவும்."
+        return f"{district} ????????? ??????? {weather['temperature']}°C ????????? ??????? {weather['humidity']}% ???????? ??????. {crop_type} ??????? ??? ???????? ???????? ?????????????? ????????? ????????????."
     if language == "hi":
-        return f"{district} में अभी तापमान {weather['temperature']}°C और आर्द्रता {weather['humidity']}% है। {crop_type} के लिए बारिश की संभावना होने पर कीटनाशक छिड़काव टालें।"
+        return f"{district} ??? ??? ?????? {weather['temperature']}°C ?? ???????? {weather['humidity']}% ??? {crop_type} ?? ??? ????? ?? ??????? ???? ?? ??????? ??????? ??????"
     if language == "kn":
-        return f"{district} ಪ್ರದೇಶದಲ್ಲಿ ಈಗ {weather['temperature']}°C ತಾಪಮಾನ ಮತ್ತು {weather['humidity']}% ಆರ್ದ್ರತೆ ಇದೆ. {crop_type} ಬೆಳೆಗೆ ಮಳೆಯ ಸಾಧ್ಯತೆ ಇದ್ದರೆ ಕೀಟನಾಶಕ ಸಿಂಪಡಣೆ ತಪ್ಪಿಸಿ."
+        return f"{district} ??????????? ?? {weather['temperature']}°C ?????? ????? {weather['humidity']}% ???????? ???. {crop_type} ?????? ???? ??????? ?????? ??????? ??????? ???????."
     return f"Weather in {district}: {weather['temperature']}°C and {weather['humidity']}% humidity. For {crop_type}, avoid pesticide spraying if rain is expected."
 
 
-def _mock_disease_analysis(crop_type: Optional[str]) -> Dict[str, Any]:
+def _crop_specific_image_analysis(crop_type: Optional[str], image_metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    crop = (crop_type or "crop").strip().lower()
+    metadata = image_metadata or {}
+    width = metadata.get("width")
+    height = metadata.get("height")
+    image_note = f" The uploaded image is {width}x{height}px." if width and height else ""
+
+    profiles = [
+        {
+            "keywords": {"paddy", "rice", "nel", "????"},
+            "disease_name": "Possible leaf blast or bacterial leaf blight",
+            "pest_name": None,
+            "severity": "medium",
+            "confidence_score": 0.64,
+            "description": "Paddy leaf symptoms commonly need checking for spindle-shaped blast lesions, yellowing from the tip, or water-soaked streaks before deciding treatment.",
+            "treatment": "Inspect 20-25 plants across the field. Remove heavily affected leaves where practical, avoid excess nitrogen, keep water level stable, and ask the local agriculture officer/KVK to confirm whether fungicide or bactericide is needed.",
+            "preventive_measures": "Use resistant varieties, balanced NPK, clean bunds, seed treatment, and avoid dense planting that keeps leaves wet for long periods.",
+        },
+        {
+            "keywords": {"tomato", "???????"},
+            "disease_name": "Possible early blight or leaf spot",
+            "pest_name": "Possible whitefly or leaf miner if insects are visible",
+            "severity": "medium",
+            "confidence_score": 0.62,
+            "description": "Tomato leaf spots, yellowing, and drying often come from early blight, septoria-type spots, bacterial spot, or sucking pest stress.",
+            "treatment": "Remove lower infected leaves, avoid overhead watering, stake plants for airflow, use yellow sticky traps for whitefly, and confirm the exact disease before selecting any spray.",
+            "preventive_measures": "Rotate away from tomato/chilli/brinjal, mulch to reduce soil splash, sanitize tools, and inspect the lower canopy twice a week.",
+        },
+        {
+            "keywords": {"cotton", "???????"},
+            "disease_name": "Possible leaf spot or sucking pest stress",
+            "pest_name": "Possible aphids, jassids, thrips, or whitefly",
+            "severity": "medium",
+            "confidence_score": 0.61,
+            "description": "Cotton yellowing, curling, and spotted leaves should be checked for sucking pests on the underside and for fungal leaf spots.",
+            "treatment": "Check five plants in at least five field locations, look under leaves for insects/eggs, use sticky traps, conserve beneficial insects, and spray only if pest count crosses local threshold.",
+            "preventive_measures": "Avoid repeated same-mode insecticides, keep borders weed-free, use recommended spacing, and monitor whitefly/jassid weekly.",
+        },
+        {
+            "keywords": {"banana", "????"},
+            "disease_name": "Possible sigatoka leaf spot or nutrient stress",
+            "pest_name": None,
+            "severity": "medium",
+            "confidence_score": 0.6,
+            "description": "Banana leaf streaks, spots, or yellow patches may indicate sigatoka-type leaf spot, nutrient imbalance, or water stress.",
+            "treatment": "Remove dried infected leaf portions, improve drainage, avoid water stagnation, maintain nutrition, and confirm the issue before any fungicide decision.",
+            "preventive_measures": "Use disease-free suckers, maintain spacing, de-trash regularly, and avoid prolonged leaf wetness.",
+        },
+        {
+            "keywords": {"chilli", "chili", "pepper", "???????"},
+            "disease_name": "Possible leaf curl, anthracnose, or leaf spot",
+            "pest_name": "Possible thrips, mites, or whitefly",
+            "severity": "medium",
+            "confidence_score": 0.62,
+            "description": "Chilli curling, yellowing, or spots often need checking for thrips/mites/whitefly and fungal or bacterial spots.",
+            "treatment": "Inspect new leaves and underside of leaves, remove severely infected plants if viral symptoms are confirmed, use sticky traps, and avoid blind pesticide mixing.",
+            "preventive_measures": "Raise healthy seedlings, rogue virus-affected plants early, manage weeds, and rotate insecticide modes only after threshold confirmation.",
+        },
+    ]
+
+    selected = next((profile for profile in profiles if any(keyword in crop for keyword in profile["keywords"])), None)
+    if not selected:
+        selected = {
+            "disease_name": "Possible leaf spot, blight, nutrient stress, or pest injury",
+            "pest_name": "Possible sucking pests if insects are visible under leaves",
+            "severity": "unknown",
+            "confidence_score": 0.55,
+            "description": "The image passed validation, but the crop type is not specific enough for a high-confidence diagnosis. Check whether symptoms are spots, yellowing, curling, rotting, or insect damage.",
+            "treatment": "Take close photos of the upper and lower leaf surface, inspect multiple plants, remove badly infected leaves, improve airflow and drainage, and confirm the exact issue with a local agriculture officer before chemical treatment.",
+            "preventive_measures": "Monitor weekly, avoid overhead irrigation when disease risk is high, keep the field clean, rotate crops where possible, and use certified seed or healthy planting material.",
+        }
+
     return {
-        "disease_name": "Leaf Blight",
-        "pest_name": "Aphids",
-        "severity": "medium",
-        "confidence_score": 0.82,
-        "description": f"The {crop_type or 'crop'} shows symptoms similar to leaf blight with possible minor aphid infestation. Sarvam chat is text-only here, so this image result is a demo fallback.",
-        "treatment": "Remove affected leaves, improve airflow, avoid excess irrigation, and consult a local agriculture officer for the correct fungicide dosage.",
-        "preventive_measures": "Maintain spacing, avoid overhead irrigation, use resistant varieties, and inspect leaves weekly.",
+        "is_crop_image": True,
+        "disease_name": selected["disease_name"],
+        "pest_name": selected["pest_name"],
+        "severity": selected["severity"],
+        "confidence_score": selected["confidence_score"],
+        "description": f"{selected['description']}{image_note}",
+        "treatment": selected["treatment"],
+        "preventive_measures": selected["preventive_measures"],
+        "analysis_source": "crop_rule_fallback",
     }
 
 
@@ -663,13 +834,13 @@ def _mock_scheme_check(scheme_name: str, annual_income: float, language: str) ->
     annual_income = annual_income or 0
     is_eligible = annual_income < 200000
     if language == "ta":
-        reason = f"உங்கள் ஆண்டு வருமானம் ₹{annual_income:,.0f}. {scheme_name} திட்டத்திற்கு நீங்கள் {'தகுதி பெறுகிறீர்கள்' if is_eligible else 'தகுதி பெறவில்லை'} என்று முதற்கட்டமாக தெரிகிறது."
+        reason = f"?????? ????? ???????? ?{annual_income:,.0f}. {scheme_name} ????????????? ??????? {'????? ?????????????' if is_eligible else '????? ?????????'} ????? ???????????? ?????????."
     elif language == "hi":
-        reason = f"आपकी वार्षिक आय ₹{annual_income:,.0f} है। {scheme_name} के लिए आप {'योग्य हैं' if is_eligible else 'योग्य नहीं हैं'}।"
+        reason = f"???? ??????? ?? ?{annual_income:,.0f} ??? {scheme_name} ?? ??? ?? {'????? ???' if is_eligible else '????? ???? ???'}?"
     elif language == "kn":
-        reason = f"ನಿಮ್ಮ ವಾರ್ಷಿಕ ಆದಾಯ ₹{annual_income:,.0f}. {scheme_name} ಯೋಜನೆಗೆ ನೀವು {'ಅರ್ಹರಾಗಿದ್ದೀರಿ' if is_eligible else 'ಅರ್ಹರಲ್ಲ'} ಎಂದು ಪ್ರಾಥಮಿಕವಾಗಿ ಕಾಣುತ್ತದೆ."
+        reason = f"????? ??????? ???? ?{annual_income:,.0f}. {scheme_name} ??????? ???? {'??????????????' if is_eligible else '????????'} ???? ???????????? ?????????."
     else:
-        reason = f"Based on annual income of ₹{annual_income:,.0f}, you {'appear eligible' if is_eligible else 'do not appear eligible'} for {scheme_name}."
+        reason = f"Based on annual income of ?{annual_income:,.0f}, you {'appear eligible' if is_eligible else 'do not appear eligible'} for {scheme_name}."
 
     return {
         "is_eligible": is_eligible,
@@ -679,3 +850,4 @@ def _mock_scheme_check(scheme_name: str, annual_income: float, language: str) ->
         "alternative_schemes": ["PM Fasal Bima Yojana", "Kisan Credit Card", "Soil Health Card Scheme"],
         "application_steps": "Visit the nearest CSC/agriculture office or official scheme portal with documents.",
     }
+

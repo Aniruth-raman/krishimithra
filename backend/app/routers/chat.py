@@ -14,6 +14,7 @@ from app.services.ai.sarvam_ai_service import (
     classify_intent,
     get_weather_advisory,
 )
+from app.services.location_extractor import extract_location
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
@@ -178,6 +179,7 @@ def _farmer_context(current_user: User) -> dict:
         return {}
     return {
         "district": farmer_profile.district,
+        "village": farmer_profile.village,
         "primary_crop": farmer_profile.primary_crop,
         "land_size": farmer_profile.land_size_acres,
         "state": farmer_profile.state,
@@ -213,6 +215,26 @@ async def _store_conversation(
     db.commit()
 
 
+def _resolve_weather_location(message: str, context: dict) -> str | None:
+    return (
+        extract_location(message)
+        or context.get("district")
+        or context.get("village")
+        or context.get("state")
+    )
+
+
+def _missing_location_message(language: str) -> str:
+    base_language = (language or "en").split("-")[0]
+    messages = {
+        "ta": "வானிலை அறிவுரைக்கு உங்கள் மாவட்டம் அல்லது நகரம் வேண்டும். உதாரணம்: Chennai-ல் இன்று தெளிக்கலாமா?",
+        "hi": "मौसम सलाह के लिए आपका जिला या शहर चाहिए। उदाहरण: Chennai में आज छिड़काव कर सकता हूँ?",
+        "kn": "ಹವಾಮಾನ ಸಲಹೆಗೆ ನಿಮ್ಮ ಜಿಲ್ಲೆ ಅಥವಾ ನಗರ ಬೇಕು. ಉದಾಹರಣೆ: Chennai ನಲ್ಲಿ ಇಂದು ಸಿಂಪಡಿಸಬಹುದೇ?",
+        "en": "I need your district or city for weather advice. Example: Can I spray today in Chennai?",
+    }
+    return messages.get(base_language, messages["en"])
+
+
 @router.post("", response_model=ChatResponse)
 async def chat(
     request: ChatRequest,
@@ -243,12 +265,22 @@ async def chat(
     intent = await classify_intent(request.message)
     context = _farmer_context(current_user)
 
-    if intent == "weather" and context.get("district"):
+    if intent == "weather":
+        location = _resolve_weather_location(request.message, context)
+        if not location:
+            response_text = _missing_location_message(request.language)
+            await _store_conversation(db, current_user, session_id, request, intent, response_text)
+            return ChatResponse(response=response_text, intent=intent, session_id=session_id)
         response_text = await get_weather_advisory(
             crop_type=context.get("primary_crop", "crop"),
-            district=context.get("district", "your district"),
+            district=location,
             query=request.message,
             language=request.language,
+        )
+    elif intent == "disease" and any(word in request.message.lower() for word in ["photo", "image", "scan", "upload", "camera", "picture"]):
+        response_text = (
+            "Upload a clear crop photo using the image button. Use JPG, JPEG, PNG, or WebP. "
+            "Take the photo in daylight, include one affected leaf or fruit, and avoid blurry long-distance shots."
         )
     elif intent == "scheme":
         scheme_result = await check_scheme_eligibility(

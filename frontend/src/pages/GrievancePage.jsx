@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ShieldCheck } from "lucide-react";
 import { api } from "../api/client";
 import { EmptyState, ErrorAlert, SuccessAlert } from "../components/Ui";
 
@@ -21,9 +22,10 @@ export default function GrievancePage() {
     setError("");
     setSuccess("");
     try {
-      const response = await api.createGrievance(form);
+      const payload = { ...form, title: form.title || form.description.slice(0, 80) || form.category };
+      const response = await api.createGrievance(payload);
       setItems((current) => [response, ...current]);
-      setSuccess(`Grievance submitted. Tracking ID: ${response.tracking_id}`);
+      setSuccess(`Tracking ID: ${response.tracking_id}`);
       setForm({ category: categories[0], title: "", description: "", district: "" });
     } catch (err) {
       setError(err.message);
@@ -35,41 +37,55 @@ export default function GrievancePage() {
     setError("");
     setTracked(null);
     try {
-      const response = await api.trackGrievance(trackingId);
-      setTracked(response);
+      setTracked(await api.trackGrievance(trackingId));
     } catch (err) {
       setError(err.message);
     }
   }
 
   return (
-    <div className="page">
-      <header className="page-header"><h2>Grievances</h2><p>Submit a complaint and track resolution progress using the tracking ID.</p></header>
+    <div className="page mobile-flow-page">
+      <header className="page-header simple-header">
+        <span className="eyebrow">Grievances</span>
+        <h2>Create and track support requests</h2>
+      </header>
       <ErrorAlert error={error} />
       <SuccessAlert message={success} />
-      <div className="two-column">
+      <section className="scan-layout">
         <section className="panel">
-          <h3>Create grievance</h3>
+          <h3>Create new grievance</h3>
           <form className="form-stack" onSubmit={submit}>
-            <label>Category<select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>{categories.map((item) => <option key={item}>{item}</option>)}</select></label>
-            <label>Title<input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
-            <label>District<input value={form.district} onChange={(e) => setForm({ ...form, district: e.target.value })} /></label>
-            <label>Description<textarea required rows="5" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
-            <button className="primary-button">Submit grievance</button>
+            <label>Category<select value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })}>{categories.map((item) => <option key={item}>{item}</option>)}</select></label>
+            <label>Description<textarea required rows="5" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Tell us what happened" /></label>
+            <label>District<input value={form.district} onChange={(event) => setForm({ ...form, district: event.target.value })} /></label>
+            <button className="primary-button">Create grievance</button>
           </form>
         </section>
+
         <section className="panel">
           <h3>Track grievance</h3>
-          <form className="inline-form" onSubmit={track}>
-            <input value={trackingId} onChange={(e) => setTrackingId(e.target.value)} placeholder="GRV2026xxxxx" required />
-            <button className="primary-button">Track</button>
+          <form className="form-stack" onSubmit={track}>
+            <label>Tracking ID<input value={trackingId} onChange={(event) => setTrackingId(event.target.value)} placeholder="GRV2026xxxxx" required /></label>
+            <button className="secondary-button">Track status</button>
           </form>
-          {tracked && <div className="tracking-card"><strong>{tracked.tracking_id}</strong><span>{tracked.status}</span><h4>{tracked.title}</h4><p>{tracked.description}</p><p><b>Officer:</b> {tracked.assigned_officer || "Not assigned"}</p><p><b>Notes:</b> {tracked.resolution_notes || "No notes yet"}</p></div>}
+          {tracked && <article className="grievance-card featured"><strong>{tracked.tracking_id}</strong><span>{tracked.status}</span><p>{tracked.title}</p><p>{tracked.resolution_notes || "No notes yet"}</p></article>}
         </section>
-      </div>
+      </section>
+
       <section className="panel">
         <h3>My grievances</h3>
-        {items.length === 0 ? <EmptyState title="No grievances" message="Submitted grievances will appear here." /> : <div className="table-wrap"><table><thead><tr><th>Tracking</th><th>Title</th><th>Category</th><th>Status</th><th>District</th></tr></thead><tbody>{items.map((item) => <tr key={item.id}><td>{item.tracking_id}</td><td>{item.title}</td><td>{item.category}</td><td><span className="pill">{item.status}</span></td><td>{item.district}</td></tr>)}</tbody></table></div>}
+        {items.length === 0 ? <EmptyState title="No grievances" message="Submitted grievances will appear here." /> : (
+          <div className="simple-card-list">
+            {items.map((item) => (
+              <article className="grievance-card" key={item.id}>
+                <ShieldCheck size={20} />
+                <strong>{item.tracking_id}</strong>
+                <span>{item.status}</span>
+                <p>{item.title}</p>
+              </article>
+            ))}
+          </div>
+        )}
       </section>
     </div>
   );

@@ -2,11 +2,13 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
+import { ThemeProvider } from "./context/ThemeContext";
 import Layout from "./components/Layout";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import AdminPage from "./pages/AdminPage";
 import ChatPage from "./pages/ChatPage";
 import DiseasePage from "./pages/DiseasePage";
+import GrievancePage from "./pages/GrievancePage";
 import HomePage from "./pages/HomePage";
 import IvrSimulatorPage from "./pages/IvrSimulatorPage";
 import LiveVoicePage from "./pages/LiveVoicePage";
@@ -14,6 +16,8 @@ import LoginPage from "./pages/LoginPage";
 import OfficerPage from "./pages/OfficerPage";
 import ProfilePage from "./pages/ProfilePage";
 import RegisterPage from "./pages/RegisterPage";
+import SchemePage from "./pages/SchemePage";
+import WeatherPage from "./pages/WeatherPage";
 import "./styles.css";
 
 function AppRoutes() {
@@ -36,8 +40,9 @@ function AppRoutes() {
         <Route path="profile" element={<ProtectedRoute roles={["farmer"]}><ProfilePage /></ProtectedRoute>} />
         <Route path="chat" element={<Navigate to="/assistant" replace />} />
         <Route path="disease" element={<ProtectedRoute roles={["farmer"]}><DiseasePage /></ProtectedRoute>} />
-        <Route path="schemes" element={<Navigate to="/assistant" replace />} />
-        <Route path="grievances" element={<Navigate to="/assistant" replace />} />
+        <Route path="weather" element={<ProtectedRoute roles={["farmer"]}><WeatherPage /></ProtectedRoute>} />
+        <Route path="schemes" element={<ProtectedRoute roles={["farmer"]}><SchemePage /></ProtectedRoute>} />
+        <Route path="grievances" element={<ProtectedRoute roles={["farmer"]}><GrievancePage /></ProtectedRoute>} />
         <Route path="voice" element={<Navigate to="/voice-live" replace />} />
         <Route
           path="officer"
@@ -48,8 +53,8 @@ function AppRoutes() {
           }
         />
         <Route path="officer/dashboard" element={<Navigate to="/officer" replace />} />
-        <Route path="officer/grievances" element={<Navigate to="/officer" replace />} />
-        <Route path="officer/diseases" element={<Navigate to="/officer" replace />} />
+        <Route path="officer/grievances" element={<Navigate to="/officer?tab=grievances" replace />} />
+        <Route path="officer/diseases" element={<Navigate to="/officer?tab=disease" replace />} />
         <Route path="officer/analytics" element={<Navigate to="/officer" replace />} />
         <Route
           path="admin"
@@ -71,6 +76,7 @@ function AppRoutes() {
         <Route path="admin/users" element={<Navigate to="/admin" replace />} />
         <Route path="admin/schemes" element={<Navigate to="/admin" replace />} />
         <Route path="admin/analytics" element={<Navigate to="/admin" replace />} />
+        <Route path="admin/settings" element={<Navigate to="/admin" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
@@ -80,9 +86,11 @@ function AppRoutes() {
 createRoot(document.getElementById("root")).render(
   <StrictMode>
     <BrowserRouter>
-      <AuthProvider>
-        <AppRoutes />
-      </AuthProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <AppRoutes />
+        </AuthProvider>
+      </ThemeProvider>
     </BrowserRouter>
   </StrictMode>,
 );

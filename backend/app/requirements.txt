@@ -13,3 +13,4 @@ pillow
 python-dotenv
 faker
 pytest
+google-generativeai

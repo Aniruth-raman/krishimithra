@@ -375,8 +375,9 @@ export default function ChatPage() {
       setVoiceState("thinking");
       const answer = await api.voiceConversation(conversationData);
       const formattedTranscript = (answer.transcript || "").trim();
+      const spokenResponse = (answer.spoken_response || answer.response || "").trim();
       if (!formattedTranscript) {
-        const fallbackText = answer.response || "I could not hear that clearly. Please try again.";
+        const fallbackText = spokenResponse || "I could not hear that clearly. Please try again.";
         setError(fallbackText);
         const spoke = browserSpeak(fallbackText);
         if (!spoke) {
@@ -403,11 +404,11 @@ export default function ChatPage() {
 
       if (answer.audio_base64) {
         const played = await playBlob(base64ToBlob(answer.audio_base64, answer.audio_mime_type || "audio/wav"));
-        if (!played && !browserSpeak(answer.response)) {
+        if (!played && !browserSpeak(spokenResponse)) {
           setError("Voice response was generated, but audio playback is unavailable.");
           setVoiceState("idle");
         }
-      } else if (!browserSpeak(answer.response)) {
+      } else if (!browserSpeak(spokenResponse)) {
         setError("Voice response was generated, but audio playback is unavailable.");
         setVoiceState("idle");
       }

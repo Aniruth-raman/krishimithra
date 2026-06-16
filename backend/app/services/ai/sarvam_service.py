@@ -88,10 +88,13 @@ async def text_to_speech(text: str, language: str = "ta-IN", speaker: Optional[s
                 }
             )
             if response.status_code == 200:
+                content_type = response.headers.get("content-type", "").lower()
+                if "audio" in content_type:
+                    return response.content
                 data = response.json()
                 audio_b64 = _extract_audio_base64(data)
                 if audio_b64:
-                    return base64.b64decode(audio_b64)
+                    return base64.b64decode(_strip_data_uri(audio_b64))
             print(f"Sarvam TTS failed {response.status_code}: {response.text}")
         return None
     except Exception as error:
@@ -104,12 +107,22 @@ def _extract_audio_base64(payload: dict) -> Optional[str]:
         return payload["audio"]
     if isinstance(payload.get("audioContent"), str):
         return payload["audioContent"]
+    if isinstance(payload.get("audio_base64"), str):
+        return payload["audio_base64"]
     audios = payload.get("audios")
     if isinstance(audios, list) and audios:
-        return audios[0]
+        first_audio = audios[0]
+        if isinstance(first_audio, str):
+            return first_audio
+        if isinstance(first_audio, dict):
+            return _extract_audio_base64(first_audio)
     if isinstance(payload.get("data"), dict):
         return _extract_audio_base64(payload["data"])
     return None
+
+
+def _strip_data_uri(audio_b64: str) -> str:
+    return audio_b64.split(",", 1)[1] if audio_b64.startswith("data:") and "," in audio_b64 else audio_b64
 
 
 def _guess_audio_mime_type(filename: str) -> str:

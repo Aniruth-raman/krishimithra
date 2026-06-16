@@ -1,5 +1,6 @@
 import uuid
 import base64
+import re
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Request
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
@@ -51,6 +52,29 @@ def _audio_language(language: str) -> str:
 
 def _chat_language(language: str) -> str:
     return AUDIO_TO_CHAT_LANGUAGE.get(_audio_language(language), language if language in {"ta", "kn", "hi", "en"} else "en")
+
+
+def _speech_text(text: str, limit: int = 650) -> str:
+    spoken = str(text or "")
+    spoken = re.sub(r"```.*?```", " ", spoken, flags=re.DOTALL)
+    spoken = re.sub(r"`([^`]*)`", r"\1", spoken)
+    spoken = re.sub(r"\*\*(.*?)\*\*", r"\1", spoken)
+    spoken = re.sub(r"\[(.*?)\]\((.*?)\)", r"\1", spoken)
+    spoken = re.sub(r"https?://\S+", " ", spoken)
+    spoken = re.sub(r"(?m)^\s{0,3}#{1,6}\s*", "", spoken)
+    spoken = re.sub(r"(?m)^\s*[-*•]+\s*", "", spoken)
+    spoken = re.sub(r"(?m)^\s*\d+[.)]\s*", "", spoken)
+    spoken = spoken.replace("|", ", ")
+    spoken = re.sub(r"[*_~>#]+", " ", spoken)
+    spoken = re.sub(r"\s*\n+\s*", ". ", spoken)
+    spoken = re.sub(r"\s+", " ", spoken).strip()
+    if len(spoken) <= limit:
+        return spoken
+    trimmed = spoken[:limit].rsplit(" ", 1)[0].strip()
+    sentence_end = max(trimmed.rfind("."), trimmed.rfind("?"), trimmed.rfind("!"))
+    if sentence_end >= 120:
+        return trimmed[: sentence_end + 1].strip()
+    return trimmed.rstrip(".,;:") + "."
 
 
 def _farmer_context(user: User) -> dict:
@@ -105,6 +129,19 @@ def _empty_voice_response(language: str, session_id: str) -> dict:
         "hi": "आपकी आवाज साफ सुनाई नहीं दी। कृपया माइक्रोफोन के पास फिर से बोलें।",
         "en": "I could not hear that clearly. Please speak again closer to the microphone.",
     }
+    response = messages.get(chat_language, messages["en"])
+    return {
+        "transcript": "",
+        "response": response,
+        "spoken_response": _speech_text(response),
+        "intent": "voice",
+        "session_id": session_id,
+        "language": chat_language,
+        "audio_language": _audio_language(language),
+        "audio_base64": None,
+        "audio_mime_type": None,
+        "tts_available": False,
+    }
 
 
 def _resolve_weather_location(message: str, context: dict) -> str | None:
@@ -124,17 +161,6 @@ def _missing_location_message(language: str) -> str:
         "en": "Tell me your district or city for weather advice.",
     }
     return messages.get((language or "en").split("-")[0], messages["en"])
-    return {
-        "transcript": "",
-        "response": "I missed that. Please say it once more, close to the microphone.",
-        "intent": "voice",
-        "session_id": session_id,
-        "language": chat_language,
-        "audio_language": _audio_language(language),
-        "audio_base64": None,
-        "audio_mime_type": None,
-        "tts_available": False,
-    }
 
 
 async def _assistant_response(
@@ -281,7 +307,7 @@ async def speak(
     if len(request.text) > 5000:
         raise HTTPException(status_code=400, detail="Text too long. Max 5000 characters.")
 
-    audio_bytes = await text_to_speech(request.text, request.language)
+    audio_bytes = await text_to_speech(_speech_text(request.text, 1000), request.language)
 
     if audio_bytes:
         return Response(
@@ -333,7 +359,7 @@ async def voice_conversation(
         voice_mode=True,
     )
 
-    tts_text = response_text[:650]
+    tts_text = _speech_text(response_text)
     audio_bytes = None if fast_response else await text_to_speech(tts_text, audio_language)
     audio_base64 = base64.b64encode(audio_bytes).decode("utf-8") if audio_bytes else None
 
@@ -341,6 +367,7 @@ async def voice_conversation(
         "transcript": transcript,
         "raw_transcript": raw_transcript,
         "response": response_text,
+        "spoken_response": tts_text,
         "intent": intent,
         "session_id": resolved_session_id,
         "language": chat_language,
@@ -377,12 +404,14 @@ async def voice_text_response(
         session_id=resolved_session_id,
         voice_mode=True,
     )
-    audio_bytes = None if fast_response else await text_to_speech(response_text[:650], audio_language)
+    tts_text = _speech_text(response_text)
+    audio_bytes = None if fast_response else await text_to_speech(tts_text, audio_language)
     audio_base64 = base64.b64encode(audio_bytes).decode("utf-8") if audio_bytes else None
 
     return {
         "transcript": formatted_text,
         "response": response_text,
+        "spoken_response": tts_text,
         "intent": intent,
         "session_id": resolved_session_id,
         "language": chat_language,
@@ -407,6 +436,8 @@ async def live_voice_session(
         "session_id": resolved_session_id,
         "provider": provider,
         "pipecat_url": pipecat_url or None,
+        "webrtc_url": pipecat_url or None,
+        "ice_servers": settings.pipecat_ice_servers_list if pipecat_url else [],
         "fallback": settings.VOICE_LIVE_FALLBACK,
         "language": _chat_language(language),
         "audio_language": _audio_language(language),
@@ -416,5 +447,5 @@ async def live_voice_session(
             "tts_model": settings.SARVAM_TTS_MODEL,
             "voice_id": settings.SARVAM_TTS_SPEAKER,
         },
-        "instructions": "Use Pipecat client transport when pipecat_url is present; otherwise use /voice/conversation in live turn loop.",
+        "instructions": "Use Pipecat SmallWebRTC when pipecat_url/webrtc_url is present; otherwise use /voice/conversation in live turn loop.",
     }

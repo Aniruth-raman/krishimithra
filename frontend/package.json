@@ -10,6 +10,8 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@pipecat-ai/client-js": "^1.11.0",
+    "@pipecat-ai/small-webrtc-transport": "^1.10.4",
     "@vitejs/plugin-react": "latest",
     "vite": "latest",
     "react": "latest",

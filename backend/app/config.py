@@ -1,5 +1,6 @@
 ﻿from pathlib import Path
-from typing import List
+from typing import Any, List
+import json
 import os
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -46,6 +47,7 @@ class Settings(BaseSettings):
     IVR_TWILIO_USE_SARVAM_AUDIO: bool = False
 
     PIPECAT_BOT_URL: str = ""
+    PIPECAT_ICE_SERVERS: str = ""
     VOICE_LIVE_FALLBACK: str = "sarvam_loop"
     VOICE_ENABLE_AI_FORMATTING: bool = True
 
@@ -62,6 +64,18 @@ class Settings(BaseSettings):
     def ivr_enabled_languages_list(self) -> List[str]:
         languages = [language.strip().lower() for language in self.IVR_ENABLED_LANGUAGES.split(",") if language.strip()]
         return languages or ["ta", "kn", "en"]
+
+    @property
+    def pipecat_ice_servers_list(self) -> List[dict[str, Any]]:
+        if not self.PIPECAT_ICE_SERVERS.strip():
+            return [{"urls": "stun:stun.l.google.com:19302"}]
+        try:
+            parsed = json.loads(self.PIPECAT_ICE_SERVERS)
+            if isinstance(parsed, list):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+        return [{"urls": url.strip()} for url in self.PIPECAT_ICE_SERVERS.split(",") if url.strip()]
 
 
 settings = Settings()

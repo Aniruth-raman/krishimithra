@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Bot, Headphones, Languages, Mic, MessageSquare, Radio, Square, Volume2, Zap } from "lucide-react";
+import { PipecatClient } from "@pipecat-ai/client-js";
+import { SmallWebRTCTransport } from "@pipecat-ai/small-webrtc-transport";
 import { api } from "../api/client";
 import { ErrorAlert } from "../components/Ui";
 import { useAuth } from "../context/AuthContext";
@@ -31,7 +33,7 @@ export default function LiveVoicePage() {
   const [language, setLanguage] = useState(user?.preferred_language || "en");
   const [status, setStatus] = useState("idle");
   const [liveMode, setLiveMode] = useState(false);
-  const [fastMode, setFastMode] = useState(true);
+  const [fastMode, setFastMode] = useState(false);
   const [sessionId, setSessionId] = useState("");
   const [provider, setProvider] = useState("");
   const [inputMode, setInputMode] = useState("");
@@ -46,13 +48,15 @@ export default function LiveVoicePage() {
   const chunksRef = useRef([]);
   const audioRef = useRef(null);
   const activeRef = useRef(false);
-  const fastModeRef = useRef(true);
+  const fastModeRef = useRef(false);
   const sessionIdRef = useRef("");
   const languageRef = useRef(language);
   const cancelRecordingRef = useRef(false);
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
   const vadFrameRef = useRef(null);
+  const pipecatClientRef = useRef(null);
+  const pipecatTurnRef = useRef({ user: "", bot: "" });
   const speechStartedRef = useRef(false);
   const silenceStartedAtRef = useRef(null);
   const recordingStartedAtRef = useRef(0);
@@ -68,6 +72,7 @@ export default function LiveVoicePage() {
   useEffect(() => {
     return () => {
       activeRef.current = false;
+      disconnectPipecat();
       stopRecording(true);
       stopPlayback();
     };
@@ -112,8 +117,55 @@ export default function LiveVoicePage() {
   }
 
   function stopPlayback() {
-    audioRef.current?.pause();
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.onended = null;
+      audioRef.current.onerror = null;
+      audioRef.current.srcObject = null;
+      audioRef.current.removeAttribute("src");
+      audioRef.current.load();
+    }
     window.speechSynthesis?.cancel();
+  }
+
+  function resetPipecatTurn() {
+    pipecatTurnRef.current = { user: "", bot: "" };
+  }
+
+  function appendPipecatText(key, text) {
+    const cleaned = cleanText(text);
+    if (!cleaned) return "";
+    const current = pipecatTurnRef.current[key] || "";
+    if (current.endsWith(cleaned)) return current;
+    const next = cleanText(`${current} ${cleaned}`);
+    pipecatTurnRef.current = { ...pipecatTurnRef.current, [key]: next };
+    return next;
+  }
+
+  function flushPipecatTurn() {
+    const transcript = cleanText(pipecatTurnRef.current.user);
+    const response = cleanText(pipecatTurnRef.current.bot);
+    if (transcript || response) {
+      setLastTranscript(transcript || lastTranscript);
+      setLastResponse(response || lastResponse);
+      if (transcript && response) pushTurn(transcript, response, "live");
+    }
+    resetPipecatTurn();
+  }
+
+  function wireRemoteAudio(track, participant) {
+    if (!track || track.kind !== "audio" || participant?.local || !audioRef.current) return;
+    audioRef.current.srcObject = new MediaStream([track]);
+    audioRef.current.play().catch(() => {
+      setError("Tap Start live voice again if browser audio playback is blocked.");
+    });
+  }
+
+  async function disconnectPipecat() {
+    const client = pipecatClientRef.current;
+    pipecatClientRef.current = null;
+    if (!client) return;
+    await client.disconnect().catch(() => undefined);
   }
 
   function stopRecording(cancel = false) {
@@ -151,7 +203,70 @@ export default function LiveVoicePage() {
     const session = await api.voiceLiveSession(formData);
     sessionIdRef.current = session.session_id;
     setSessionId(session.session_id);
-    setProvider(session.provider === "pipecat" ? "Pipecat configured" : "Sarvam browser loop");
+    setProvider(session.provider === "pipecat" ? "Pipecat SmallWebRTC" : "Sarvam browser loop");
+    return session;
+  }
+
+  async function startPipecatLive(session) {
+    if (!session?.pipecat_url) return false;
+
+    await disconnectPipecat();
+    stopRecording(true);
+    stopPlayback();
+    resetPipecatTurn();
+    setInputMode("smallwebrtc");
+
+    const transport = new SmallWebRTCTransport({
+      iceServers: session.ice_servers || [{ urls: "stun:stun.l.google.com:19302" }],
+    });
+    const client = new PipecatClient({
+      transport,
+      enableCam: false,
+      enableMic: true,
+      callbacks: {
+        onConnected: () => setStatus("listening"),
+        onDisconnected: () => {
+          if (!activeRef.current) setStatus("idle");
+        },
+        onTransportStateChanged: (state) => {
+          if (["connecting", "initializing", "initialized"].includes(state)) setStatus("connecting");
+          if (["connected", "ready"].includes(state)) setStatus("listening");
+          if (state === "error") setError("SmallWebRTC connection failed. Check the Pipecat bot URL.");
+        },
+        onTrackStarted: wireRemoteAudio,
+        onUserStartedSpeaking: () => setStatus("listening"),
+        onUserStoppedSpeaking: () => setStatus("thinking"),
+        onBotStartedSpeaking: () => setStatus("speaking"),
+        onBotStoppedSpeaking: () => {
+          flushPipecatTurn();
+          if (activeRef.current) setStatus("listening");
+        },
+        onUserTranscript: (data) => {
+          const transcript = appendPipecatText("user", data?.text);
+          if (transcript) setLastTranscript(transcript);
+        },
+        onBotOutput: (data) => {
+          if (data?.spoken === false) return;
+          const response = appendPipecatText("bot", data?.text);
+          if (response) setLastResponse(response);
+        },
+        onBotTranscript: (data) => {
+          const response = appendPipecatText("bot", data?.text);
+          if (response) setLastResponse(response);
+        },
+        onError: (message) => {
+          setError(message?.data?.error || message?.data?.message || "SmallWebRTC voice session failed.");
+        },
+      },
+    });
+
+    pipecatClientRef.current = client;
+    await client.connect({
+      webrtcRequestParams: { endpoint: session.webrtc_url || session.pipecat_url },
+      iceConfig: { iceServers: session.ice_servers || [{ urls: "stun:stun.l.google.com:19302" }] },
+    });
+    setStatus("listening");
+    return true;
   }
 
   async function startListening() {
@@ -353,6 +468,7 @@ export default function LiveVoicePage() {
 
     try {
       window.speechSynthesis?.cancel();
+      audioRef.current.srcObject = null;
       audioRef.current.src = audioUrl;
       audioRef.current.onended = () => {
         URL.revokeObjectURL(audioUrl);
@@ -371,13 +487,14 @@ export default function LiveVoicePage() {
   }
 
   async function speakAnswer(answer) {
+    const spokenResponse = cleanText(answer.spoken_response || answer.response);
     if (answer.audio_base64) {
       const blob = base64ToBlob(answer.audio_base64, answer.audio_mime_type || "audio/wav");
-      const played = await playAudioBlob(blob, answer.response);
+      const played = await playAudioBlob(blob, spokenResponse);
       if (played) return;
     }
 
-    if (!browserSpeak(answer.response)) {
+    if (!browserSpeak(spokenResponse)) {
       setError("Audio playback is unavailable in this browser.");
       scheduleNextListen(300);
     }
@@ -410,8 +527,9 @@ export default function LiveVoicePage() {
 
       const transcript = cleanText(answer.transcript);
       const response = cleanText(answer.response);
+      const spokenResponse = cleanText(answer.spoken_response || response);
       if (transcript) pushTurn(transcript, response, answer.intent);
-      await speakAnswer({ ...answer, response });
+      await speakAnswer({ ...answer, response, spoken_response: spokenResponse });
     } catch (err) {
       setError(err.message);
       scheduleNextListen(800);
@@ -434,8 +552,9 @@ export default function LiveVoicePage() {
 
       const transcript = cleanText(answer.transcript || prompt);
       const response = cleanText(answer.response);
+      const spokenResponse = cleanText(answer.spoken_response || response);
       pushTurn(transcript, response, answer.intent);
-      await speakAnswer({ ...answer, response });
+      await speakAnswer({ ...answer, response, spoken_response: spokenResponse });
     } catch (err) {
       setError(err.message);
       scheduleNextListen(800);
@@ -449,7 +568,8 @@ export default function LiveVoicePage() {
     setLiveMode(true);
 
     try {
-      await startSession();
+      const session = await startSession();
+      if (await startPipecatLive(session)) return;
       await startListening();
     } catch (err) {
       activeRef.current = false;
@@ -462,6 +582,7 @@ export default function LiveVoicePage() {
   function stopLive() {
     activeRef.current = false;
     setLiveMode(false);
+    disconnectPipecat();
     stopRecording(true);
     stopPlayback();
     setStatus("idle");
@@ -480,6 +601,11 @@ export default function LiveVoicePage() {
     await sendTextTurn("Give a short crop advisory for today's field work.");
   }
 
+  const inputModeLabel = {
+    smallwebrtc: "SmallWebRTC live",
+    speech: "Browser speech",
+    audio: "Audio upload",
+  }[inputMode];
   const selectedLanguage = languages.find((item) => item.value === language) || languages.at(-1);
 
   return (
@@ -494,7 +620,7 @@ export default function LiveVoicePage() {
           <Radio size={19} />
           <div>
             <strong>{provider || "Sarvam browser loop"}</strong>
-            <span>{inputMode ? `${inputMode === "speech" ? "Browser speech" : "Audio upload"} mode` : sessionId ? `Session ${sessionId.slice(0, 8)}` : "Ready"}</span>
+            <span>{inputModeLabel ? `${inputModeLabel} mode` : sessionId ? `Session ${sessionId.slice(0, 8)}` : "Ready"}</span>
           </div>
         </div>
       </section>
@@ -534,7 +660,7 @@ export default function LiveVoicePage() {
           <div className="live-control-row">
             <button className={liveMode ? "secondary-button danger-soft" : "primary-button"} type="button" onClick={toggleLive}>
               {liveMode ? <Square size={17} /> : <Headphones size={17} />}
-              {liveMode ? "Stop live voice" : "Start live voice"}
+              {liveMode ? "End live voice" : "Start live voice"}
             </button>
             <button className="secondary-button" type="button" onClick={testSpokenReply} disabled={status === "listening" || status === "thinking"}>
               <Volume2 size={17} />

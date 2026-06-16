@@ -11,6 +11,7 @@ router = APIRouter(prefix="/scheme", tags=["Scheme Eligibility"])
 
 AVAILABLE_SCHEMES = [
     "PM-KISAN",
+    "Raitha Sakthi Yojana",
     "Krushak Yojana",
     "Mukhyamantri Samathuvapuram",
     "PM Fasal Bima Yojana",
